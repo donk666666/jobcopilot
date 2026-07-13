@@ -1,10 +1,25 @@
 import chromadb
+from chromadb.api.types import (
+    EmbeddingFunction as ChromaEmbeddingFunction,
+    Embeddings,
+    Document,
+)
 from chromadb.config import Settings as ChromaSettings
 from sentence_transformers import SentenceTransformer
 from app.config import settings
 
 _embedding_model = None
 _vectorstore = None
+
+
+class SentenceTransformerEmbeddingFunction(ChromaEmbeddingFunction[Document]):
+    """将 SentenceTransformer 封装为 ChromaDB EmbeddingFunction。"""
+
+    def __init__(self, model: SentenceTransformer):
+        self._model = model
+
+    def __call__(self, input: list[Document]) -> Embeddings:
+        return self._model.encode(input).tolist()
 
 
 def get_embedding_model() -> SentenceTransformer:
@@ -30,9 +45,7 @@ def get_or_create_collection(name: str = "tech_docs") -> chromadb.Collection:
     """获取已存在的集合，若不存在则创建。返回带嵌入函数的 Collection 对象。"""
     client = get_vectorstore()
     model = get_embedding_model()
-
-    def embedding_fn(texts: list[str]) -> list[list[float]]:
-        return model.encode(texts).tolist()
+    embedding_fn = SentenceTransformerEmbeddingFunction(model)
 
     try:
         collection = client.get_collection(name=name, embedding_function=embedding_fn)
