@@ -6,4 +6,6 @@ venv/
 .vscode/
 .claude/
 .superpowers/
+data/
+logs/
 
