@@ -7,7 +7,6 @@ langchain-openai==0.3.7
 chromadb==0.6.3
 sentence-transformers==3.4.1
 pypdf==5.1.0
-unstructured==0.17.2
 lark-oapi==1.7.1
 feedparser==6.0.11
 httpx==0.28.1

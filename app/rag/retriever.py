@@ -56,6 +56,9 @@ def _keyword_search(query: str, top_k: int = 10) -> list[dict]:
 
 def hybrid_search(query: str, top_k: int = 5) -> list[dict]:
     """混合检索：向量检索 + 关键词检索，合并去重排序"""
+    if not query or not query.strip():
+        return []
+
     vec_results = _vector_search(query, top_k * 2)
     kw_results = _keyword_search(query, top_k * 2)
 

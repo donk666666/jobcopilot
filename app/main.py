@@ -1,9 +1,10 @@
 import logging
 import os
+import secrets
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, UploadFile, File, Request
+from fastapi import FastAPI, UploadFile, File, Request, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -77,12 +78,19 @@ async def chat(req: ChatRequest):
 
 @app.post("/api/knowledge/upload")
 async def upload_knowledge(file: UploadFile = File(...)):
+    safe_name = Path(file.filename).name  # 防路径穿越
+    if safe_name != file.filename or ".." in file.filename:
+        raise HTTPException(status_code=400, detail="非法文件名")
+    ext = Path(safe_name).suffix.lower()
+    if ext not in (".md", ".txt", ".pdf", ".markdown"):
+        raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}")
+
     os.makedirs("./data/docs", exist_ok=True)
-    file_path = Path("./data/docs") / file.filename
+    file_path = Path("./data/docs") / safe_name
     content = await file.read()
     file_path.write_bytes(content)
     chunks = index_document(str(file_path))
-    return {"status": "ok", "chunks": chunks, "filename": file.filename}
+    return {"status": "ok", "chunks": chunks, "filename": safe_name}
 
 
 @app.post("/api/knowledge/crawl")
@@ -96,9 +104,17 @@ async def knowledge_stats():
     try:
         col = get_or_create_collection()
         count = col.count()
+        # 统计不重复的文档来源
+        all_data = col.get()
+        sources = set()
+        if all_data.get("metadatas"):
+            for meta in all_data["metadatas"]:
+                sources.add(meta.get("source", "unknown"))
+        doc_count = len(sources)
     except Exception:
         count = 0
-    return {"doc_count": "未知", "chunk_count": count}
+        doc_count = 0
+    return {"doc_count": doc_count, "chunk_count": count}
 
 
 @app.post("/feishu/callback")
