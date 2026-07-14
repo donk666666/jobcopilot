@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  qa-bot:
+    build: .
+    container_name: smart-doc-qa
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    restart: unless-stopped
