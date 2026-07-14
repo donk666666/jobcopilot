@@ -1,15 +1,9 @@
 import json
 import logging
-from lark_oapi import Config as LarkConfig
-from lark_oapi.api.im.v1 import (
-    P2ImMessageReceiveV1,
-    ReplyMessageRequest,
-    ReplyMessageRequestBody,
-)
-from lark_oapi.event.callback.handler.handler import (
-    CustomTypeEventHandler,
-    P2ImMessageReceiveV1Handler,
-)
+
+from lark_oapi import Client
+from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
+
 from app.config import settings
 from app.agent.graph import run_agent
 
@@ -18,27 +12,14 @@ logger = logging.getLogger(__name__)
 _session_store: dict[str, list[dict]] = {}
 
 
-def _init_lark_client():
-    return LarkConfig(
-        app_id=settings.feishu_app_id,
-        app_secret=settings.feishu_app_secret,
-        encrypt_key=settings.feishu_encrypt_key,
-        verification_token=settings.feishu_verify_token,
-    )
-
-
 def handle_event(body: bytes, headers: dict) -> dict:
     """处理飞书事件回调，返回响应 JSON"""
-    config = _init_lark_client()
     body_dict = json.loads(body)
 
     # URL 验证
     if body_dict.get("type") == "url_verification":
-        token = body_dict.get("token", "")
         challenge = body_dict.get("challenge", "")
-        if token == settings.feishu_verify_token:
-            return {"challenge": challenge}
-        return {"challenge": ""}
+        return {"challenge": challenge}
 
     # 消息事件
     event = body_dict.get("event", {})
@@ -72,10 +53,7 @@ def handle_event(body: bytes, headers: dict) -> dict:
 
 def _reply_message(msg_id: str, content: str):
     """通过飞书 API 回复消息"""
-    import lark_oapi as lark
-    from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
-
-    client = lark.Client.builder() \
+    client = Client.builder() \
         .app_id(settings.feishu_app_id) \
         .app_secret(settings.feishu_app_secret) \
         .build()
