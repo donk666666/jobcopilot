@@ -8,10 +8,7 @@ RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debia
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# PyTorch CPU 版本（先于 sentence-transformers 安装，避免拉取 CUDA 依赖）
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-
-# Python 依赖
+# Python 依赖（系统无 CUDA，torch 自动安装 CPU 版本）
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
