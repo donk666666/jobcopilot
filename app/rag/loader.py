@@ -17,7 +17,7 @@ def _get_loader(file_path: str):
         return TextLoader(file_path, encoding="utf-8")
 
 
-def load_and_split(file_path: str, chunk_size: int = 800, chunk_overlap: int = 100):
+def load_and_split(file_path: str, chunk_size: int = 500, chunk_overlap: int = 80):
     loader = _get_loader(file_path)
     docs = loader.load()
     splitter = RecursiveCharacterTextSplitter(
