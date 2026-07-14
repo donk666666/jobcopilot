@@ -1,4 +1,5 @@
-from typing import TypedDict, Annotated
+from typing_extensions import TypedDict
+from typing import Annotated
 
 
 class RetrievedDoc(TypedDict):
