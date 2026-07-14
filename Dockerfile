@@ -1,7 +1,8 @@
 FROM docker.m.daocloud.io/library/python:3.11-slim
 
-# HuggingFace 镜像（国内镜像）
-ENV HF_ENDPOINT=https://hf-mirror.com
+# HuggingFace 本地模型路径，禁用联网
+ENV HF_HOME=/app/models
+ENV HF_HUB_OFFLINE=1
 
 WORKDIR /app
 
@@ -21,8 +22,8 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua
 # 源码
 COPY app/ ./app/
 
-# 预下载 Embedding 模型
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-zh-v1.5')"
+# 预下载的 Embedding 模型（本地离线，不联网）
+COPY models/ ./models/
 
 # 创建数据和日志目录
 RUN mkdir -p data logs

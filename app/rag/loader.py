@@ -2,7 +2,7 @@ import os
 import uuid
 from pathlib import Path
 
-from langchain_community.document_loaders import TextLoader, PyPDFLoader, UnstructuredMarkdownLoader
+from langchain_community.document_loaders import TextLoader, PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from app.rag.vectorstore import get_or_create_collection
 
@@ -12,7 +12,7 @@ def _get_loader(file_path: str):
     if ext == ".pdf":
         return PyPDFLoader(file_path)
     elif ext in (".md", ".markdown"):
-        return UnstructuredMarkdownLoader(file_path)
+        return TextLoader(file_path, encoding="utf-8")
     else:
         return TextLoader(file_path, encoding="utf-8")
 
