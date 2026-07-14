@@ -1,9 +1,5 @@
 FROM docker.m.daocloud.io/library/python:3.11-slim
 
-# HuggingFace 本地模型路径，禁用联网
-ENV HF_HOME=/app/models
-ENV HF_HUB_OFFLINE=1
-
 WORKDIR /app
 
 # 系统依赖
@@ -22,8 +18,12 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua
 # 源码
 COPY app/ ./app/
 
-# 预下载的 Embedding 模型（本地离线，不联网）
+# 预下载的 Embedding 模型（本地离线）
 COPY models/ ./models/
+
+# 展开模型文件到标准路径
+RUN mkdir -p /app/models/bge-small-zh-v1.5 \
+    && cp -r models/models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620/* /app/models/bge-small-zh-v1.5/
 
 # 创建数据和日志目录
 RUN mkdir -p data logs

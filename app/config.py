@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     llm_model: str = "glm-5.2"
 
     # Embedding
-    embedding_model: str = "BAAI/bge-small-zh-v1.5"
+    embedding_model: str = "./models/bge-small-zh-v1.5"
 
     # ChromaDB
     chroma_persist_dir: str = "./data/chroma"
