@@ -1,0 +1,125 @@
+[
+  {
+    "question": "LangChain 的 Chain 怎么用",
+    "relevant_docs": ["langchain-core.md"]
+  },
+  {
+    "question": "LCEL 表达式语言是什么",
+    "relevant_docs": ["langchain-core.md"]
+  },
+  {
+    "question": "LangChain 里 Agent 和 Chain 有什么区别",
+    "relevant_docs": ["langchain-core.md"]
+  },
+  {
+    "question": "Docker 怎么查看运行中的容器",
+    "relevant_docs": ["docker-cheatsheet.md"]
+  },
+  {
+    "question": "Docker Compose 怎么使用",
+    "relevant_docs": ["docker-cheatsheet.md"]
+  },
+  {
+    "question": "FastAPI 怎么创建一个 GET 接口",
+    "relevant_docs": ["fastapi-quickref.md"]
+  },
+  {
+    "question": "FastAPI 文件上传怎么处理",
+    "relevant_docs": ["fastapi-quickref.md"]
+  },
+  {
+    "question": "Prompt Engineering 有哪些常见策略",
+    "relevant_docs": ["prompt-engineering.md"]
+  },
+  {
+    "question": "Few-shot 和 Zero-shot 有什么区别",
+    "relevant_docs": ["prompt-engineering.md"]
+  },
+  {
+    "question": "Linux 怎么查看系统日志",
+    "relevant_docs": ["linux-cheatsheet.md"]
+  },
+  {
+    "question": "Linux 文件权限 chmod 怎么用",
+    "relevant_docs": ["linux-cheatsheet.md"]
+  },
+  {
+    "question": "文本分割用什么 chunk_size 比较好",
+    "relevant_docs": ["langchain-core.md"]
+  },
+  {
+    "question": "Docker 怎么删除停止的容器",
+    "relevant_docs": ["docker-cheatsheet.md"]
+  },
+  {
+    "question": "FastAPI 怎么返回 JSON 响应",
+    "relevant_docs": ["fastapi-quickref.md"]
+  },
+  {
+    "question": "CoT 思维链提示是什么",
+    "relevant_docs": ["prompt-engineering.md"]
+  },
+
+  {
+    "question": "做 RAG 项目时，用 LangChain 搭检索链路 + FastAPI 暴露 API + Docker 部署的完整流程是怎样的",
+    "relevant_docs": ["langchain-core.md", "fastapi-quickref.md", "docker-cheatsheet.md"]
+  },
+  {
+    "question": "在服务器上部署一个 LLM 应用，日志怎么看、怎么排查问题",
+    "relevant_docs": ["linux-cheatsheet.md", "docker-cheatsheet.md"]
+  },
+  {
+    "question": "给应用写提示词的时候应该注意什么，有哪些坑要避免",
+    "relevant_docs": ["prompt-engineering.md"]
+  },
+  {
+    "question": "我的 API 接口总是报 500 错误，有哪些排查思路",
+    "relevant_docs": ["fastapi-quickref.md", "linux-cheatsheet.md"]
+  },
+  {
+    "question": "把训练好的模型打包成镜像推到服务器上跑，步骤有哪些",
+    "relevant_docs": ["docker-cheatsheet.md", "linux-cheatsheet.md"]
+  },
+
+  {
+    "question": "vLLM 是什么框架，和 Ollama 有啥区别",
+    "relevant_docs": []
+  },
+  {
+    "question": "React Hooks 的 useEffect 怎么用",
+    "relevant_docs": []
+  },
+  {
+    "question": "MySQL 怎么优化慢查询",
+    "relevant_docs": []
+  },
+  {
+    "question": "Kubernetes Pod 一直 CrashLoopBackOff 怎么办",
+    "relevant_docs": []
+  },
+  {
+    "question": "前端怎么用 WebSocket 实现实时通信",
+    "relevant_docs": []
+  },
+
+  {
+    "question": "拆文档",
+    "relevant_docs": ["langchain-core.md"]
+  },
+  {
+    "question": "怎么弄那个链式的东西",
+    "relevant_docs": ["langchain-core.md"]
+  },
+  {
+    "question": "怎么写提示",
+    "relevant_docs": ["prompt-engineering.md"]
+  },
+  {
+    "question": "文件传不上去咋整",
+    "relevant_docs": ["fastapi-quickref.md"]
+  },
+  {
+    "question": "权限不够怎么改",
+    "relevant_docs": ["linux-cheatsheet.md"]
+  }
+]
