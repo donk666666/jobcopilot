@@ -80,4 +80,14 @@ def hybrid_search(query: str, top_k: int = 5) -> list[dict]:
         r.pop("_vec_score", None)
 
     sorted_results = sorted(merged.values(), key=lambda r: r["score"], reverse=True)
-    return sorted_results[:top_k]
+
+    # 同一文档只保留最高分 chunk，提升结果多样性
+    seen_sources: set[str] = set()
+    deduped: list[dict] = []
+    for r in sorted_results:
+        src = r["source"]
+        if src not in seen_sources:
+            seen_sources.add(src)
+            deduped.append(r)
+
+    return deduped[:top_k]
