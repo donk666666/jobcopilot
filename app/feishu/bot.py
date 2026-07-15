@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 
 from lark_oapi import Client
 from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
@@ -13,15 +14,15 @@ _session_store: dict[str, list[dict]] = {}
 
 
 def handle_event(body: bytes, headers: dict) -> dict:
-    """处理飞书事件回调，返回响应 JSON"""
+    """处理飞书事件回调，返回响应 JSON（同步部分仅做校验和快速响应）"""
     body_dict = json.loads(body)
 
-    # URL 验证
+    # URL 验证 — 必须同步返回
     if body_dict.get("type") == "url_verification":
         challenge = body_dict.get("challenge", "")
         return {"challenge": challenge}
 
-    # 消息事件
+    # 消息事件 — 异步处理，不阻塞飞书回调
     event = body_dict.get("event", {})
     msg_type = event.get("message", {}).get("message_type", "")
 
@@ -30,25 +31,32 @@ def handle_event(body: bytes, headers: dict) -> dict:
         user_text = content.get("text", "")
         chat_id = event.get("message", {}).get("chat_id", "")
         msg_id = event.get("message", {}).get("message_id", "")
-        user_id = event.get("sender", {}).get("sender_id", {}).get("user_id", "")
 
-        if user_text:
-            session_id = f"feishu_{chat_id}"
-            history = _session_store.get(session_id, [])
-
-            result = run_agent(user_text, history=history)
-
-            history.append({"role": "user", "content": user_text})
-            history.append({"role": "assistant", "content": result["answer"]})
-            _session_store[session_id] = history[-10:]
-
-            # 异步回复
-            try:
-                _reply_message(msg_id, result["answer"])
-            except Exception as e:
-                logger.error(f"飞书回复失败: {e}")
+        if user_text and msg_id and chat_id:
+            threading.Thread(
+                target=_process_and_reply,
+                args=(user_text, chat_id, msg_id),
+                daemon=True,
+            ).start()
 
     return {}
+
+
+def _process_and_reply(user_text: str, chat_id: str, msg_id: str):
+    """后台线程：跑 Agent + 回复消息"""
+    try:
+        session_id = f"feishu_{chat_id}"
+        history = _session_store.get(session_id, [])
+
+        result = run_agent(user_text, history=history)
+
+        history.append({"role": "user", "content": user_text})
+        history.append({"role": "assistant", "content": result["answer"]})
+        _session_store[session_id] = history[-10:]
+
+        _reply_message(msg_id, result["answer"])
+    except Exception as e:
+        logger.error(f"飞书消息处理失败: {e}")
 
 
 def _reply_message(msg_id: str, content: str):
@@ -62,8 +70,9 @@ def _reply_message(msg_id: str, content: str):
     body.content = json.dumps({"text": content})
     body.msg_type = "text"
 
-    request = ReplyMessageRequest()
-    request.message_id = msg_id
-    request.request_body = body
+    request = ReplyMessageRequest.builder() \
+        .message_id(msg_id) \
+        .request_body(body) \
+        .build()
 
     client.im.v1.message.reply(request)
