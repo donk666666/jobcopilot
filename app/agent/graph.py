@@ -1,38 +1,19 @@
 from langgraph.graph import StateGraph, END
 from app.agent import AgentState
 from app.agent.nodes import (
-    rewrite_query,
     retrieve,
-    judge_relevance,
     generate,
 )
-
-
-def _route_by_relevance(state: AgentState) -> str:
-    answer = state.get("final_answer", "")
-    if answer and answer.startswith("抱歉"):
-        return END
-    return "generate"
 
 
 def get_agent_graph() -> StateGraph:
     graph = StateGraph(AgentState)
 
-    graph.add_node("rewrite_query", rewrite_query)
     graph.add_node("retrieve", retrieve)
-    graph.add_node("judge_relevance", judge_relevance)
     graph.add_node("generate", generate)
 
-    graph.set_entry_point("rewrite_query")
-
-    graph.add_edge("rewrite_query", "retrieve")
-    graph.add_edge("retrieve", "judge_relevance")
-
-    graph.add_conditional_edges("judge_relevance", _route_by_relevance, {
-        "generate": "generate",
-        END: END,
-    })
-
+    graph.set_entry_point("retrieve")
+    graph.add_edge("retrieve", "generate")
     graph.add_edge("generate", END)
 
     return graph.compile()

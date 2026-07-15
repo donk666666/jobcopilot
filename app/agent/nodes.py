@@ -96,13 +96,20 @@ def judge_relevance(state: AgentState) -> dict:
 
 
 def generate(state: AgentState) -> dict:
-    """基于检索结果生成回答"""
-    query = state.get("rewritten_query") or _get_last_user_message(state)
+    """基于检索结果生成回答（合并对话上下文，无需独立改写节点）"""
+    user_msg = _get_last_user_message(state)
     docs = state.get("retrieved_docs", [])
+
+    # 收集最近几轮对话作为上下文
+    recent_msgs = state["messages"][-6:]
+    history_ctx = "\n".join(
+        f"{m.get('role', 'unknown')}: {m.get('content', '')[:200]}"
+        for m in recent_msgs if isinstance(m, dict)
+    )
 
     contexts = "\n---\n".join(
         f"[来源: {d['source']}]\n{d['content']}"
-        for d in docs[:3]
+        for d in docs[:2]
     )
 
     llm = create_llm(temperature=0.5)
@@ -115,16 +122,19 @@ def generate(state: AgentState) -> dict:
 - 使用中文回答
 
 文档片段：
-{contexts}""")
+{contexts}
+
+对话历史：
+{history_ctx}""")
 
     recent = [m for m in state["messages"] if isinstance(m, dict)][-4:]
     resp = llm.invoke(
         [system]
         + [HumanMessage(content=m["content"]) if m["role"] == "user" else SystemMessage(content=m["content"]) for m in recent]
-        + [HumanMessage(content=query)]
+        + [HumanMessage(content=user_msg)]
     )
 
-    return {"final_answer": resp.content}
+    return {"final_answer": resp.content, "rewritten_query": user_msg}
 
 
 def clarify(state: AgentState) -> dict:

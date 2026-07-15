@@ -32,6 +32,12 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("应用启动")
+    # 预热 embedding 模型，避免首条消息冷启动
+    from app.rag.vectorstore import get_embedding_model, get_or_create_collection
+    logger.info("预热 embedding 模型...")
+    get_embedding_model()
+    get_or_create_collection()
+    logger.info("预热完成")
     start_scheduler()
     logger.info(f"爬虫定时器已启动，间隔 {settings.crawl_schedule_hours} 小时")
     yield
