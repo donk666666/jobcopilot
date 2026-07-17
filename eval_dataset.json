@@ -121,5 +121,99 @@
   {
     "question": "权限不够怎么改",
     "relevant_docs": ["linux-cheatsheet.md"]
+  },
+
+  {
+    "question": "LangGraph 的 StateGraph 怎么定义状态",
+    "relevant_docs": ["langgraph-guide.md"]
+  },
+  {
+    "question": "LangGraph 里 add_conditional_edges 怎么用",
+    "relevant_docs": ["langgraph-guide.md"]
+  },
+  {
+    "question": "LangGraph 和 LangChain 的 Chain 有什么区别",
+    "relevant_docs": ["langgraph-guide.md"]
+  },
+  {
+    "question": "Checkpoint 在 LangGraph 里怎么实现对话记忆",
+    "relevant_docs": ["langgraph-guide.md"]
+  },
+  {
+    "question": "LangGraph Subgraph 嵌套子图是什么",
+    "relevant_docs": ["langgraph-guide.md"]
+  },
+
+  {
+    "question": "文档加载的时候支持哪些文件格式",
+    "relevant_docs": ["doc-processing.md"]
+  },
+  {
+    "question": "RecursiveCharacterTextSplitter 的 separators 参数怎么设置",
+    "relevant_docs": ["doc-processing.md"]
+  },
+  {
+    "question": "chunk_overlap 设置多少比较合适",
+    "relevant_docs": ["doc-processing.md"]
+  },
+  {
+    "question": "文档切分完怎么去重",
+    "relevant_docs": ["doc-processing.md"]
+  },
+
+  {
+    "question": "RAG 的整体流程分哪几步",
+    "relevant_docs": ["rag-pipeline.md"]
+  },
+  {
+    "question": "向量检索和关键词检索怎么混合排序",
+    "relevant_docs": ["rag-pipeline.md"]
+  },
+  {
+    "question": "RAG 里为什么要做 OOD 门控",
+    "relevant_docs": ["rag-pipeline.md"]
+  },
+  {
+    "question": "BGE-small 和 BGE-large 怎么选",
+    "relevant_docs": ["rag-pipeline.md"]
+  },
+  {
+    "question": "RAG 评估有哪些关键指标",
+    "relevant_docs": ["rag-pipeline.md"]
+  },
+
+  {
+    "question": "用 LangGraph 搭一个 retrieve + generate 的 RAG 流程，文档怎么切分比较好",
+    "relevant_docs": ["langgraph-guide.md", "rag-pipeline.md", "doc-processing.md"]
+  },
+  {
+    "question": "从加载文档到生成回答的完整 RAG 链路，LangGraph 在哪个环节起作用",
+    "relevant_docs": ["rag-pipeline.md", "langgraph-guide.md", "doc-processing.md"]
+  },
+  {
+    "question": "混合检索的权重怎么调，chunk 去重放在哪个阶段",
+    "relevant_docs": ["rag-pipeline.md", "doc-processing.md"]
+  },
+
+  {
+    "question": "那个图怎么用",
+    "relevant_docs": ["langgraph-guide.md"]
+  },
+  {
+    "question": "怎么切文件",
+    "relevant_docs": ["doc-processing.md"]
+  },
+  {
+    "question": "整个流程是咋跑起来的",
+    "relevant_docs": ["rag-pipeline.md"]
+  },
+
+  {
+    "question": "Python 的 GIL 锁是什么",
+    "relevant_docs": []
+  },
+  {
+    "question": "Redis 缓存雪崩怎么解决",
+    "relevant_docs": []
   }
 ]
