@@ -1,0 +1,63 @@
+:root {
+  /* Background layers — light blue */
+  --bg-deepest: #f0f4f9;
+  --bg-card: #ffffff;
+  --bg-hover: #f1f5f9;
+  --bg-elevated: #ffffff;
+  --bg-input: #f5f7fb;
+
+  /* Accent — blue */
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-subtle: rgba(59, 130, 246, 0.1);
+  --accent-glow: rgba(59, 130, 246, 0.15);
+
+  /* Accent — gold (for highlights, score badges) */
+  --accent-gold: #f59e0b;
+  --accent-gold-subtle: rgba(245, 158, 11, 0.12);
+
+  /* Text */
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+
+  /* Semantic */
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-info: #3b82f6;
+
+  /* Borders */
+  --border-subtle: #e2e8f0;
+  --border-input: #cbd5e1;
+  --border-focus: #3b82f6;
+
+  /* Typography */
+  --font-sans: 'Inter', 'Noto Sans SC', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Shadows */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-elevated: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-glow: 0 0 20px var(--accent-glow);
+
+  /* Radii */
+  --radius-card: 12px;
+  --radius-btn: 8px;
+  --radius-input: 8px;
+  --radius-tag: 6px;
+  --radius-modal: 16px;
+
+  /* Transition durations */
+  --t-fast: 150ms;
+  --t-normal: 250ms;
+  --t-slow: 300ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 0ms;
+    --t-normal: 0ms;
+    --t-slow: 0ms;
+  }
+}

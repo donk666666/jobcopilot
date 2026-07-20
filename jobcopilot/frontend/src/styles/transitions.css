@@ -1,0 +1,30 @@
+/* Route-level page transitions */
+.fade-slide-enter-active {
+  transition: opacity var(--t-slow) ease-out, transform var(--t-slow) ease-out;
+}
+.fade-slide-leave-active {
+  transition: opacity var(--t-fast) ease-in, transform var(--t-fast) ease-in;
+}
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* Card list staggered entrance */
+.card-stagger-enter-active {
+  transition: opacity var(--t-normal) ease-out, transform var(--t-normal) ease-out;
+}
+.card-stagger-leave-active {
+  transition: opacity var(--t-fast) ease-in;
+}
+.card-stagger-enter-from {
+  opacity: 0;
+  transform: translateY(12px);
+}
+.card-stagger-leave-to {
+  opacity: 0;
+}
