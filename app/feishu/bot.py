@@ -57,17 +57,18 @@ def _process_and_reply(user_text: str, chat_id: str, msg_id: str, thread_id: str
 
     try:
         session_id = f"feishu_{chat_id}"
-        history = _store.get_history(session_id)
+        user_id = "feishu"
+        history = _store.get_history(session_id, user_id)
 
         if not history:
             title = user_text[:20].replace("\n", " ")
-            _store.create_session(session_id, title)
+            _store.create_session(session_id, user_id, title)
 
-        context_msgs, _ = build_context(session_id, _store, history)
+        context_msgs, _ = build_context(session_id, user_id, _store, history)
         result = run_agent(user_text, context=context_msgs)
 
-        _store.add_message(session_id, "user", user_text)
-        _store.add_message(session_id, "assistant", result["answer"])
+        _store.add_message(session_id, user_id, "user", user_text)
+        _store.add_message(session_id, user_id, "assistant", result["answer"])
 
         if thread_id and thread_id != msg_id:
             _reply_message(thread_id, result["answer"])

@@ -1,6 +1,5 @@
 import logging
 import os
-import secrets
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -18,7 +17,6 @@ from app.feishu.bot import handle_event
 from app.session_store import SessionStore
 from app.memory import build_context
 
-# 日志配置
 os.makedirs(settings.log_dir, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
@@ -47,22 +45,27 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="智能文档问答助手", version="1.0.0", lifespan=lifespan)
 
-# 静态文件
 static_dir = Path(__file__).parent / "web" / "static"
 static_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-# 会话持久化存储
 store = SessionStore()
 
 
 # --- 模型 ---
+
 class ChatRequest(BaseModel):
     message: str
     session_id: str = "default"
+    user_id: str = ""
+
+
+class DeleteRequest(BaseModel):
+    user_id: str = ""
 
 
 # --- 路由 ---
+
 @app.get("/")
 async def root():
     return FileResponse(str(static_dir / "index.html"))
@@ -75,23 +78,18 @@ async def health():
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    # 读取完整历史
-    history = store.get_history(req.session_id)
+    user_id = req.user_id or "default"
+    history = store.get_history(req.session_id, user_id)
 
-    # 第一条消息自动设为会话标题
     if not history:
         title = req.message[:20].replace("\n", " ")
-        store.create_session(req.session_id, title)
+        store.create_session(req.session_id, user_id, title)
 
-    # 构建上下文（滑动窗口 + 摘要）
-    context_msgs, summary = build_context(req.session_id, store, history)
-
-    # 跑 Agent
+    context_msgs, _ = build_context(req.session_id, user_id, store, history)
     result = run_agent(req.message, context=context_msgs)
 
-    # 持久化当前轮消息
-    store.add_message(req.session_id, "user", req.message)
-    store.add_message(req.session_id, "assistant", result["answer"])
+    store.add_message(req.session_id, user_id, "user", req.message)
+    store.add_message(req.session_id, user_id, "assistant", result["answer"])
 
     return {
         "reply": result["answer"],
@@ -100,26 +98,27 @@ async def chat(req: ChatRequest):
     }
 
 
-# --- 会话管理 API ---
-
 @app.get("/api/sessions")
-async def list_sessions():
-    sessions = store.list_sessions()
+async def list_sessions(user_id: str = ""):
+    uid = user_id or "default"
+    sessions = store.list_sessions(uid)
     return {"sessions": sessions}
 
 
 @app.get("/api/sessions/{session_id}")
-async def get_session(session_id: str):
-    session = store.get_session(session_id)
+async def get_session(session_id: str, user_id: str = ""):
+    uid = user_id or "default"
+    session = store.get_session(session_id, uid)
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
-    messages = store.get_history(session_id)
+    messages = store.get_history(session_id, uid)
     return {"session": session, "messages": messages}
 
 
 @app.delete("/api/sessions/{session_id}")
-async def delete_session(session_id: str):
-    store.delete_session(session_id)
+async def delete_session(session_id: str, user_id: str = ""):
+    uid = user_id or "default"
+    store.delete_session(session_id, uid)
     return {"status": "ok"}
 
 

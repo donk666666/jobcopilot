@@ -77,9 +77,16 @@ const sessionListEl = document.getElementById('sessionList');
 let currentSessionId = localStorage.getItem('currentSessionId') || crypto.randomUUID();
 localStorage.setItem('currentSessionId', currentSessionId);
 
+let userId = localStorage.getItem('userId') || crypto.randomUUID();
+localStorage.setItem('userId', userId);
+
+function apiUrl(path) {
+  return path + (path.includes('?') ? '&' : '?') + 'user_id=' + encodeURIComponent(userId);
+}
+
 async function loadSessions() {
   try {
-    const res = await fetch('/api/sessions');
+    const res = await fetch(apiUrl('/api/sessions'));
     const data = await res.json();
     renderSessionList(data.sessions || []);
   } catch(e) {
@@ -110,7 +117,7 @@ async function switchSession(sessionId) {
   msgsEl.innerHTML = '';
 
   try {
-    const res = await fetch('/api/sessions/' + sessionId);
+    const res = await fetch(apiUrl('/api/sessions/' + sessionId));
     const data = await res.json();
     if (data.messages) {
       data.messages.forEach(m => addMsg(m.role, m.content));
@@ -125,7 +132,7 @@ async function switchSession(sessionId) {
 async function deleteSession(sessionId) {
   if (!confirm('确定删除这个对话吗？')) return;
   try {
-    await fetch('/api/sessions/' + sessionId, { method: 'DELETE' });
+    await fetch(apiUrl('/api/sessions/' + sessionId), { method: 'DELETE' });
     if (sessionId === currentSessionId) {
       newSession();
     } else {
@@ -194,7 +201,7 @@ async function doSend() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({message: text, session_id: currentSessionId}),
+      body: JSON.stringify({message: text, session_id: currentSessionId, user_id: userId}),
     });
     const data = await res.json();
     thinking.remove();

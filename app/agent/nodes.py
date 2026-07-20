@@ -119,10 +119,11 @@ def generate(state: AgentState) -> dict:
 文档片段：
 {contexts}""")
 
-    # 直接使用 state 中已预处理的消息列表
-    recent = [m for m in state["messages"] if isinstance(m, dict)][-6:]
+    # 使用 memory 模块预处理好的上下文消息（已含摘要 + 窗口）
+    # 保留所有 system 和最近的用户/助手消息
+    all_msgs = [m for m in state["messages"] if isinstance(m, dict)]
     chat_msgs = []
-    for m in recent:
+    for m in all_msgs:
         if m["role"] == "system":
             chat_msgs.append(SystemMessage(content=m["content"]))
         elif m["role"] == "assistant":

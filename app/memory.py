@@ -4,10 +4,9 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from app.config import settings
 
-# 压缩参数
-WINDOW_ROUNDS = 10          # 活跃窗口：最近 N 轮（每轮 = user + assistant 共 2 条）
-MAX_SUMMARY_CHARS = 300     # 摘要最大字数
-MAX_CONTEXT_TOKENS = 6000   # 上下文 token 上限（估算）
+WINDOW_ROUNDS = 10
+MAX_SUMMARY_CHARS = 300
+MAX_CONTEXT_TOKENS = 6000
 
 
 def _create_llm(temperature: float = 0.3) -> ChatOpenAI:
@@ -20,33 +19,19 @@ def _create_llm(temperature: float = 0.3) -> ChatOpenAI:
 
 
 def _estimate_tokens(text: str) -> int:
-    """粗略估算 token 数（中文约 1 字=1 token，英文约 4 字符=1 token）"""
     return len(text)
 
 
 def compress_history(messages: list[dict], existing_summary: str = "") -> str:
-    """
-    将超出窗口的消息压缩为摘要。
-    采用增量策略：已有摘要 + 新增超出部分 → 新摘要。
-
-    Args:
-        messages: 完整消息列表 [{"role": "user"/"assistant", "content": "..."}, ...]
-        existing_summary: 已有的历史摘要
-
-    Returns:
-        新的摘要文本（≤ MAX_SUMMARY_CHARS 字）
-    """
     window_size = WINDOW_ROUNDS * 2
     if len(messages) <= window_size:
         return existing_summary
 
-    # 只取超出窗口的部分
     overflow = messages[:-window_size]
 
-    # 构建压缩 prompt
     conv_text = "\n".join(
         f"{m['role']}: {m['content'][:200]}"
-        for m in overflow[-20:]  # 最多取最近 20 条溢出消息做增量
+        for m in overflow[-20:]
     )
 
     llm = _create_llm(temperature=0.1)
@@ -64,45 +49,30 @@ def compress_history(messages: list[dict], existing_summary: str = "") -> str:
     resp = llm.invoke([system, HumanMessage(content=conv_text)])
     summary = resp.content.strip().strip('"').strip("'")
 
-    # 确保不超过字数限制
     if len(summary) > MAX_SUMMARY_CHARS:
         summary = summary[:MAX_SUMMARY_CHARS]
 
     return summary
 
 
-def build_context(session_id: str, session_store, messages: list[dict]) -> tuple[list[dict], str]:
-    """
-    构建传给 Agent 的最终上下文。
-
-    Args:
-        session_id: 会话 ID
-        session_store: SessionStore 实例
-        messages: 当前会话完整消息列表
-
-    Returns:
-        (context_messages, summary) 元组
-            - context_messages: 传给 Agent 的消息列表 [{"role":..., "content":...}, ...]
-            - summary: 生成的摘要（供外部写入 DB）
-    """
+def build_context(
+    session_id: str, user_id: str, session_store, messages: list[dict]
+) -> tuple[list[dict], str]:
     window_size = WINDOW_ROUNDS * 2
-    summary = session_store.get_summary(session_id) or ""
+    summary = session_store.get_summary(session_id, user_id) or ""
 
-    # 是否需要压缩
     if len(messages) > window_size:
-        last_compressed_idx = session_store.get_summary_last_idx(session_id)
+        last_compressed_idx = session_store.get_summary_last_idx(session_id, user_id)
         overflow = messages[:-window_size]
 
-        # 检查是否有新的溢出消息需要增量压缩
         new_overflow = [m for m in overflow if m.get("id", 0) > last_compressed_idx]
         if new_overflow:
             summary = compress_history(messages, existing_summary=summary)
-            session_store.save_summary(session_id, summary, messages[-window_size - 1].get("id", 0) if messages else 0)
+            last_idx = messages[-window_size - 1].get("id", 0) if len(messages) > window_size else 0
+            session_store.save_summary(session_id, user_id, summary, last_idx)
 
-    # 窗口消息
     window_msgs = messages[-window_size:] if len(messages) > window_size else messages
 
-    # 构建最终上下文
     context_messages = []
     if summary:
         context_messages.append({"role": "system", "content": f"[对话历史摘要]\n{summary}"})
@@ -112,16 +82,12 @@ def build_context(session_id: str, session_store, messages: list[dict]) -> tuple
         for m in window_msgs
     )
 
-    # token 上限兜底：缩减窗口
     total_text = "".join(m["content"] for m in context_messages)
     if _estimate_tokens(total_text) > MAX_CONTEXT_TOKENS:
-        # 缩减到 5 轮
         reduced = window_msgs[-10:] if len(window_msgs) > 10 else window_msgs
         context_messages = []
         if summary:
-            # 压缩摘要为更短版本
-            short_summary = summary[:150]
-            context_messages.append({"role": "system", "content": f"[历史摘要]\n{short_summary}"})
+            context_messages.append({"role": "system", "content": f"[历史摘要]\n{summary[:150]}"})
         context_messages.extend(
             {"role": m["role"], "content": m["content"]}
             for m in reduced
