@@ -34,8 +34,9 @@ def compress_history(messages: list[dict], existing_summary: str = "") -> str:
         for m in overflow[-20:]
     )
 
-    llm = _create_llm(temperature=0.1)
-    system = SystemMessage(content=f"""你是一个对话摘要器。请将以下对话片段压缩为一段简洁的摘要。
+    try:
+        llm = _create_llm(temperature=0.1)
+        system = SystemMessage(content=f"""你是一个对话摘要器。请将以下对话片段压缩为一段简洁的摘要。
 
 规则：
 - 摘要不超过 {MAX_SUMMARY_CHARS} 字
@@ -46,8 +47,11 @@ def compress_history(messages: list[dict], existing_summary: str = "") -> str:
 
 {"已有历史摘要：" + existing_summary if existing_summary else ""}""")
 
-    resp = llm.invoke([system, HumanMessage(content=conv_text)])
-    summary = resp.content.strip().strip('"').strip("'")
+        resp = llm.invoke([system, HumanMessage(content=conv_text)])
+        summary = resp.content.strip().strip('"').strip("'")
+    except Exception:
+        # LLM 调用失败时降级：保留已有摘要不变
+        return existing_summary
 
     if len(summary) > MAX_SUMMARY_CHARS:
         summary = summary[:MAX_SUMMARY_CHARS]
