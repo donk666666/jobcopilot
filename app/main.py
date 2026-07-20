@@ -15,6 +15,8 @@ from app.rag.loader import index_document, index_directory
 from app.rag.vectorstore import get_or_create_collection
 from app.crawler.feed import fetch_feeds, start_scheduler
 from app.feishu.bot import handle_event
+from app.session_store import SessionStore
+from app.memory import build_context
 
 # 日志配置
 os.makedirs(settings.log_dir, exist_ok=True)
@@ -32,7 +34,6 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("应用启动")
-    # 预热 embedding 模型，避免首条消息冷启动
     from app.rag.vectorstore import get_embedding_model, get_or_create_collection
     logger.info("预热 embedding 模型...")
     get_embedding_model()
@@ -51,14 +52,14 @@ static_dir = Path(__file__).parent / "web" / "static"
 static_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+# 会话持久化存储
+store = SessionStore()
+
 
 # --- 模型 ---
 class ChatRequest(BaseModel):
     message: str
     session_id: str = "default"
-
-
-__session_store: dict[str, list[dict]] = {}
 
 
 # --- 路由 ---
@@ -74,17 +75,59 @@ async def health():
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    history = __session_store.get(req.session_id, [])
-    result = run_agent(req.message, history=history)
-    history.append({"role": "user", "content": req.message})
-    history.append({"role": "assistant", "content": result["answer"]})
-    __session_store[req.session_id] = history[-20:]
-    return {"reply": result["answer"], "sources": result["sources"], "session_id": req.session_id}
+    # 读取完整历史
+    history = store.get_history(req.session_id)
 
+    # 第一条消息自动设为会话标题
+    if not history:
+        title = req.message[:20].replace("\n", " ")
+        store.create_session(req.session_id, title)
+
+    # 构建上下文（滑动窗口 + 摘要）
+    context_msgs, summary = build_context(req.session_id, store, history)
+
+    # 跑 Agent
+    result = run_agent(req.message, context=context_msgs)
+
+    # 持久化当前轮消息
+    store.add_message(req.session_id, "user", req.message)
+    store.add_message(req.session_id, "assistant", result["answer"])
+
+    return {
+        "reply": result["answer"],
+        "sources": result["sources"],
+        "session_id": req.session_id,
+    }
+
+
+# --- 会话管理 API ---
+
+@app.get("/api/sessions")
+async def list_sessions():
+    sessions = store.list_sessions()
+    return {"sessions": sessions}
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session(session_id: str):
+    session = store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    messages = store.get_history(session_id)
+    return {"session": session, "messages": messages}
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    store.delete_session(session_id)
+    return {"status": "ok"}
+
+
+# --- 知识库 ---
 
 @app.post("/api/knowledge/upload")
 async def upload_knowledge(file: UploadFile = File(...)):
-    safe_name = Path(file.filename).name  # 防路径穿越
+    safe_name = Path(file.filename).name
     if safe_name != file.filename or ".." in file.filename:
         raise HTTPException(status_code=400, detail="非法文件名")
     ext = Path(safe_name).suffix.lower()
@@ -110,7 +153,6 @@ async def knowledge_stats():
     try:
         col = get_or_create_collection()
         count = col.count()
-        # 统计不重复的文档来源
         all_data = col.get()
         sources = set()
         if all_data.get("metadatas"):

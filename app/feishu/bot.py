@@ -12,22 +12,22 @@ from lark_oapi.api.im.v1 import (
 
 from app.config import settings
 from app.agent.graph import run_agent
+from app.session_store import SessionStore
+from app.memory import build_context
 
 logger = logging.getLogger(__name__)
 
-_session_store: dict[str, list[dict]] = {}
+_store = SessionStore()
 
 
 def handle_event(body: bytes, headers: dict) -> dict:
     """处理飞书事件回调，返回响应 JSON（同步部分仅做校验和快速响应）"""
     body_dict = json.loads(body)
 
-    # URL 验证 — 必须同步返回
     if body_dict.get("type") == "url_verification":
         challenge = body_dict.get("challenge", "")
         return {"challenge": challenge}
 
-    # 消息事件 — 异步处理，不阻塞飞书回调
     event = body_dict.get("event", {})
     msg_type = event.get("message", {}).get("message_type", "")
 
@@ -53,21 +53,22 @@ def _process_and_reply(user_text: str, chat_id: str, msg_id: str, thread_id: str
     """后台线程：先发"处理中"，再跑 Agent + 回复答案"""
     logger.info(f"收到飞书消息: chat_id={chat_id}, text={user_text[:50]}...")
 
-    # 1. 即时回复"处理中"
     _reply_message(msg_id, "处理中，请稍候...")
 
-    # 2. 跑 Agent
     try:
         session_id = f"feishu_{chat_id}"
-        history = _session_store.get(session_id, [])
+        history = _store.get_history(session_id)
 
-        result = run_agent(user_text, history=history)
+        if not history:
+            title = user_text[:20].replace("\n", " ")
+            _store.create_session(session_id, title)
 
-        history.append({"role": "user", "content": user_text})
-        history.append({"role": "assistant", "content": result["answer"]})
-        _session_store[session_id] = history[-10:]
+        context_msgs, _ = build_context(session_id, _store, history)
+        result = run_agent(user_text, context=context_msgs)
 
-        # 3. 发送正式回答（群聊发 thread reply，私聊发 chat message）
+        _store.add_message(session_id, "user", user_text)
+        _store.add_message(session_id, "assistant", result["answer"])
+
         if thread_id and thread_id != msg_id:
             _reply_message(thread_id, result["answer"])
         else:
@@ -78,7 +79,6 @@ def _process_and_reply(user_text: str, chat_id: str, msg_id: str, thread_id: str
 
 
 def _reply_message(msg_id: str, content: str):
-    """通过飞书 API 回复消息"""
     logger.info(f"回复消息 msg_id={msg_id}, content_len={len(content)}")
     try:
         client = Client.builder() \
@@ -102,7 +102,6 @@ def _reply_message(msg_id: str, content: str):
 
 
 def _send_message(chat_id: str, content: str):
-    """通过飞书 API 发送消息到会话"""
     logger.info(f"发送消息 chat_id={chat_id}, content_len={len(content)}")
     try:
         client = Client.builder() \

@@ -25,7 +25,6 @@ def _get_last_user_message(state: AgentState) -> str:
 
 
 def classify_intent(state: AgentState) -> dict:
-    """判断用户意图：是技术问题还是非技术闲聊"""
     user_msg = _get_last_user_message(state)
     llm = create_llm(temperature=0.0)
 
@@ -45,10 +44,8 @@ def classify_intent(state: AgentState) -> dict:
 
 
 def rewrite_query(state: AgentState) -> dict:
-    """将上下文相关的问题改写为独立检索语句"""
     user_msg = _get_last_user_message(state)
 
-    # 收集最近几轮对话作为上下文
     recent_msgs = state["messages"][-6:]
     context = "\n".join(
         f"{m.get('role', 'unknown')}: {m.get('content', '')[:200]}"
@@ -71,21 +68,18 @@ def rewrite_query(state: AgentState) -> dict:
 
 
 def retrieve(state: AgentState) -> dict:
-    """执行混合检索"""
     query = state.get("rewritten_query") or _get_last_user_message(state)
     docs = hybrid_search(query, top_k=5)
     return {"retrieved_docs": docs}
 
 
 def judge_relevance(state: AgentState) -> dict:
-    """判断检索结果与问题的相关性"""
     query = state.get("rewritten_query") or _get_last_user_message(state)
     docs = state.get("retrieved_docs", [])
 
     if not docs:
         return {"need_clarify": False, "final_answer": "抱歉，知识库中未找到相关内容。"}
 
-    # 最高分高于阈值则视为相关
     max_score = docs[0]["score"]
     is_relevant = max_score >= 0.3
 
@@ -96,16 +90,16 @@ def judge_relevance(state: AgentState) -> dict:
 
 
 def generate(state: AgentState) -> dict:
-    """基于检索结果生成回答（合并对话上下文，无需独立改写节点）"""
+    """
+    基于检索结果生成回答。
+    context 已由 memory.build_context 预处理：
+    - system 消息（含历史摘要，如有）
+    - 窗口内最近 10 轮完整消息
+    - 当前用户消息在末尾
+    此处不再重复截取历史，直接使用 state["messages"]。
+    """
     user_msg = _get_last_user_message(state)
     docs = state.get("retrieved_docs", [])
-
-    # 收集最近几轮对话作为上下文
-    recent_msgs = state["messages"][-6:]
-    history_ctx = "\n".join(
-        f"{m.get('role', 'unknown')}: {m.get('content', '')[:200]}"
-        for m in recent_msgs if isinstance(m, dict)
-    )
 
     contexts = "\n---\n".join(
         f"[来源: {d['source']}]\n{d['content']}"
@@ -120,32 +114,33 @@ def generate(state: AgentState) -> dict:
 - 如果文档信息不足以完整回答，诚实说明
 - 回答末尾引用来源文件名
 - 使用中文回答
+- 如果对话上下文中包含"历史摘要"，参考它来理解对话背景
 
 文档片段：
-{contexts}
+{contexts}""")
 
-对话历史：
-{history_ctx}""")
-
-    recent = [m for m in state["messages"] if isinstance(m, dict)][-4:]
-    resp = llm.invoke(
-        [system]
-        + [HumanMessage(content=m["content"]) if m["role"] == "user" else SystemMessage(content=m["content"]) for m in recent]
-        + [HumanMessage(content=user_msg)]
-    )
+    # 直接使用 state 中已预处理的消息列表
+    recent = [m for m in state["messages"] if isinstance(m, dict)][-6:]
+    chat_msgs = []
+    for m in recent:
+        if m["role"] == "system":
+            chat_msgs.append(SystemMessage(content=m["content"]))
+        elif m["role"] == "assistant":
+            chat_msgs.append(SystemMessage(content=m["content"]))
+        else:
+            chat_msgs.append(HumanMessage(content=m["content"]))
+    resp = llm.invoke([system] + chat_msgs + [HumanMessage(content=user_msg)])
 
     return {"final_answer": resp.content, "rewritten_query": user_msg}
 
 
 def clarify(state: AgentState) -> dict:
-    """判断回答是否够清晰，是否需要反问"""
     answer = state.get("final_answer", "")
     query = state.get("rewritten_query") or _get_last_user_message(state)
 
     if not answer or answer.startswith("抱歉"):
         return {"need_clarify": False}
 
-    # 回答过短可能不够清晰，但不强制追问
     if len(answer) < 60:
         prompt = f"问题：{query}\n回答：{answer}\n这个回答是否信息不足、需要追问？只回复 true 或 false"
         llm = create_llm(temperature=0.0)

@@ -17,41 +17,135 @@
   .msg-bot h1 { font-size:1.2rem; }
   .msg-bot h2 { font-size:1.1rem; }
   .msg-bot h3 { font-size:1rem; }
+  .sidebar-item { cursor:pointer; border-radius:0.5rem; padding:0.625rem 0.75rem; margin-bottom:0.25rem; transition:background 0.15s; }
+  .sidebar-item:hover { background:#f3f4f6; }
+  .sidebar-item.active { background:#eff6ff; }
+  .sidebar-item .delete-btn { opacity:0; transition:opacity 0.15s; }
+  .sidebar-item:hover .delete-btn { opacity:1; }
 </style>
 </head>
 <body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
-<div class="w-full max-w-2xl bg-white rounded-2xl shadow-lg flex flex-col" style="height: 90vh">
+<div class="w-full max-w-5xl bg-white rounded-2xl shadow-lg flex" style="height: 90vh">
 
-  <!-- Header -->
-  <div class="px-6 py-4 border-b flex items-center gap-3">
-    <i class="fa fa-comments-o text-2xl text-blue-600"></i>
-    <div>
-      <h1 class="text-lg font-semibold">智能文档问答助手</h1>
-      <p class="text-xs text-gray-400">基于 RAG + GLM-5.2</p>
-    </div>
-  </div>
-
-  <!-- Messages -->
-  <div id=messages class="flex-1 overflow-y-auto px-6 py-4 space-y-4"></div>
-
-  <!-- Input -->
-  <div class="px-6 py-4 border-t">
-    <div class="flex gap-2">
-      <input id=input type=text placeholder="输入你的问题…" autofocus
-       class="flex-1 border rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-400 text-sm">
-      <button id=send class="bg-blue-600 text-white px-5 py-3 rounded-xl hover:bg-blue-700 text-sm font-medium">
-        <i class="fa fa-paper-plane"></i>
+  <!-- Sidebar -->
+  <div class="w-64 border-r flex flex-col flex-shrink-0">
+    <div class="px-4 py-4 border-b">
+      <button id=newChat class="w-full bg-blue-600 text-white px-4 py-2.5 rounded-xl hover:bg-blue-700 text-sm font-medium flex items-center justify-center gap-2">
+        <i class="fa fa-plus"></i> 新对话
       </button>
     </div>
+    <div id=sessionList class="flex-1 overflow-y-auto px-3 py-2"></div>
   </div>
 
+  <!-- Main chat -->
+  <div class="flex-1 flex flex-col min-w-0">
+
+    <!-- Header -->
+    <div class="px-6 py-4 border-b flex items-center gap-3">
+      <i class="fa fa-comments-o text-2xl text-blue-600"></i>
+      <div>
+        <h1 class="text-lg font-semibold">智能文档问答助手</h1>
+        <p class="text-xs text-gray-400">基于 RAG + GLM-5.2</p>
+      </div>
+    </div>
+
+    <!-- Messages -->
+    <div id=messages class="flex-1 overflow-y-auto px-6 py-4 space-y-4"></div>
+
+    <!-- Input -->
+    <div class="px-6 py-4 border-t">
+      <div class="flex gap-2">
+        <input id=input type=text placeholder="输入你的问题…" autofocus
+         class="flex-1 border rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-400 text-sm">
+        <button id=send class="bg-blue-600 text-white px-5 py-3 rounded-xl hover:bg-blue-700 text-sm font-medium">
+          <i class="fa fa-paper-plane"></i>
+        </button>
+      </div>
+    </div>
+
+  </div>
 </div>
 
 <script>
-const msgs = document.getElementById('messages');
+const msgsEl = document.getElementById('messages');
 const input = document.getElementById('input');
 const send = document.getElementById('send');
+const newChatBtn = document.getElementById('newChat');
+const sessionListEl = document.getElementById('sessionList');
 
+// ---- Session management ----
+let currentSessionId = localStorage.getItem('currentSessionId') || crypto.randomUUID();
+localStorage.setItem('currentSessionId', currentSessionId);
+
+async function loadSessions() {
+  try {
+    const res = await fetch('/api/sessions');
+    const data = await res.json();
+    renderSessionList(data.sessions || []);
+  } catch(e) {
+    console.error('加载会话列表失败:', e);
+  }
+}
+
+function renderSessionList(sessions) {
+  sessionListEl.innerHTML = '';
+  sessions.forEach(s => {
+    const div = document.createElement('div');
+    div.className = 'sidebar-item flex items-center justify-between' + (s.id === currentSessionId ? ' active' : '');
+    div.innerHTML = `
+      <span class="text-sm truncate flex-1" title="${escHtml(s.title)}">${escHtml(s.title)}</span>
+      <span class="delete-btn text-gray-400 hover:text-red-500 ml-1 flex-shrink-0" data-sid="${escHtml(s.id)}">
+        <i class="fa fa-trash-o text-xs"></i>
+      </span>
+    `;
+    div.querySelector('.sidebar-item span:first-child').onclick = () => switchSession(s.id);
+    div.querySelector('.delete-btn').onclick = (e) => { e.stopPropagation(); deleteSession(s.id); };
+    sessionListEl.appendChild(div);
+  });
+}
+
+async function switchSession(sessionId) {
+  currentSessionId = sessionId;
+  localStorage.setItem('currentSessionId', sessionId);
+  msgsEl.innerHTML = '';
+
+  try {
+    const res = await fetch('/api/sessions/' + sessionId);
+    const data = await res.json();
+    if (data.messages) {
+      data.messages.forEach(m => addMsg(m.role, m.content));
+    }
+  } catch(e) {
+    console.error('加载会话历史失败:', e);
+  }
+
+  loadSessions();
+}
+
+async function deleteSession(sessionId) {
+  if (!confirm('确定删除这个对话吗？')) return;
+  try {
+    await fetch('/api/sessions/' + sessionId, { method: 'DELETE' });
+    if (sessionId === currentSessionId) {
+      newSession();
+    } else {
+      loadSessions();
+    }
+  } catch(e) {
+    console.error('删除失败:', e);
+  }
+}
+
+function newSession() {
+  currentSessionId = crypto.randomUUID();
+  localStorage.setItem('currentSessionId', currentSessionId);
+  msgsEl.innerHTML = '';
+  loadSessions();
+}
+
+newChatBtn.onclick = newSession;
+
+// ---- Chat ----
 function addMsg(role, text, sources) {
   const div = document.createElement('div');
   div.className = role === 'user'
@@ -73,16 +167,16 @@ function addMsg(role, text, sources) {
     bubble.textContent = text;
   }
   div.appendChild(bubble);
-  msgs.appendChild(div);
+  msgsEl.appendChild(div);
 
   if (sources && sources.length) {
     const src = document.createElement('div');
     src.className = 'text-xs text-gray-400 mt-1 ml-10';
     src.textContent = '来源: ' + sources.map(s => s.source).join(', ');
-    msgs.appendChild(src);
+    msgsEl.appendChild(src);
   }
 
-  msgs.scrollTop = msgs.scrollHeight;
+  msgsEl.scrollTop = msgsEl.scrollHeight;
 }
 
 async function doSend() {
@@ -94,25 +188,35 @@ async function doSend() {
   const thinking = document.createElement('div');
   thinking.className = 'text-gray-400 text-sm ml-10';
   thinking.textContent = '思考中...';
-  msgs.appendChild(thinking);
+  msgsEl.appendChild(thinking);
 
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({message: text, session_id: 'web'}),
+      body: JSON.stringify({message: text, session_id: currentSessionId}),
     });
     const data = await res.json();
     thinking.remove();
     addMsg('bot', data.reply, data.sources);
+    loadSessions();  // 刷新侧边栏（更新标题/排序）
   } catch(e) {
     thinking.remove();
     addMsg('bot', '请求失败: ' + e.message);
   }
 }
 
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
 send.onclick = doSend;
 input.onkeydown = e => { if (e.key==='Enter') doSend(); };
+
+// 初始化
+loadSessions();
 </script>
 </body>
 </html>
