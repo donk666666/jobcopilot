@@ -120,8 +120,10 @@ def generate(state: AgentState) -> dict:
 {contexts}""")
 
     # 使用 memory 模块预处理好的上下文消息（已含摘要 + 窗口）
-    # 保留所有 system 和最近的用户/助手消息
     all_msgs = [m for m in state["messages"] if isinstance(m, dict)]
+    # 去掉最后一条用户消息（即当前问题），避免和后面的 HumanMessage(user_msg) 重复
+    if all_msgs and all_msgs[-1]["role"] == "user":
+        all_msgs = all_msgs[:-1]
     chat_msgs = []
     for m in all_msgs:
         if m["role"] == "system":
