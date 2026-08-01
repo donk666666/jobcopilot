@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from config import DATABASE_URL
 from urllib.parse import urlparse
 
-# 自动建库（MySQL 需要先有库才能建表）
+# 自动建库（MySQL 需要先有库才能建表；SQLite 自动创建，跳过）
 parsed = urlparse(DATABASE_URL)
 if parsed.scheme in ("mysql+pymysql", "mysql"):
     db_name = parsed.path.lstrip("/")

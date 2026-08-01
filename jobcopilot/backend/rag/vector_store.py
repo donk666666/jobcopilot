@@ -9,6 +9,9 @@ import os
 import logging
 from typing import List, Optional, Dict
 
+# 国内 HuggingFace 镜像，避免下载超时
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
 logger = logging.getLogger("jobcopilot.rag")
 
 # 向量库持久化目录

@@ -9,12 +9,14 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from agent.core import match_resume_direct, tailor_resume_direct
+import config
 from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
 from rag.vector_store import get_vector_store
 from database import get_db, ResumeOptimization, Resume
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from prompts.resume_tailor import RESUME_MATCH_SYSTEM, RESUME_MATCH_USER_TEMPLATE, RESUME_TAILOR_SYSTEM, RESUME_TAILOR_USER_TEMPLATE
+from cache import cache_llm_result, get_cached_llm, get_redis_status
 
 router = APIRouter(prefix="/api/resume", tags=["简历优化"])
 
@@ -39,6 +41,22 @@ async def match_resume(request: ResumeMatchRequest, db: Session = Depends(get_db
     if not request.resume_text.strip():
         raise HTTPException(status_code=400, detail="简历文本不能为空")
 
+    # 查缓存
+    cached = get_cached_llm(request.jd_analysis, request.resume_text, "match")
+    if cached is not None:
+        parsed = cached
+        record = ResumeOptimization(
+            jd_analysis_id=request.jd_analysis_id,
+            resume_text=request.resume_text,
+            jd_analysis_json=request.jd_analysis,
+            match_score=parsed.get("match_score"),
+            match_detail=json.dumps(parsed, ensure_ascii=False),
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return {"result": parsed, "success": True, "opt_id": record.id, "cached": True}
+
     result = await match_resume_direct(
         jd_analysis=request.jd_analysis,
         resume_text=request.resume_text,
@@ -48,6 +66,7 @@ async def match_resume(request: ResumeMatchRequest, db: Session = Depends(get_db
 
     if result.get("success") and result.get("result"):
         parsed = result["result"]
+        cache_llm_result(request.jd_analysis, request.resume_text, "match", parsed)
         record = ResumeOptimization(
             jd_analysis_id=request.jd_analysis_id,
             resume_text=request.resume_text,
@@ -78,6 +97,30 @@ async def tailor_resume(request: ResumeTailorRequest, db: Session = Depends(get_
             "并在每处修改之后用【改动说明：xxx】标注", "。不要添加任何改动说明或注释"
         )
 
+    # 查缓存
+    cached = get_cached_llm(request.jd_analysis, request.resume_text, f"tailor_ann{1 if annotations_on else 0}")
+    if cached is not None:
+        # 存入库
+        if request.opt_id:
+            record = db.query(ResumeOptimization).filter(ResumeOptimization.id == request.opt_id).first()
+            if record:
+                record.tailored_resume = cached
+                record.annotations_enabled = 1 if annotations_on else 0
+                db.commit()
+                return {"result": cached, "success": True, "opt_id": record.id, "cached": True}
+
+        # 无 opt_id，新建
+        record = ResumeOptimization(
+            jd_analysis_json=request.jd_analysis,
+            resume_text=request.resume_text,
+            tailored_resume=cached,
+            annotations_enabled=1 if annotations_on else 0,
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return {"result": cached, "success": True, "opt_id": record.id, "cached": True}
+
     llm = ChatOpenAI(
         api_key=DEEPSEEK_API_KEY,
         base_url=DEEPSEEK_BASE_URL,
@@ -95,27 +138,80 @@ async def tailor_resume(request: ResumeTailorRequest, db: Session = Depends(get_
     ]
 
     response = await llm.ainvoke(messages)
+    tailored = response.content
+
+    cache_llm_result(request.jd_analysis, request.resume_text, f"tailor_ann{1 if annotations_on else 0}", tailored)
 
     # 存入库
     if request.opt_id:
         record = db.query(ResumeOptimization).filter(ResumeOptimization.id == request.opt_id).first()
         if record:
-            record.tailored_resume = response.content
+            record.tailored_resume = tailored
             record.annotations_enabled = 1 if annotations_on else 0
             db.commit()
-            return {"result": response.content, "success": True, "opt_id": record.id}
+            return {"result": tailored, "success": True, "opt_id": record.id}
 
     # 无 opt_id，新建
     record = ResumeOptimization(
         jd_analysis_json=request.jd_analysis,
         resume_text=request.resume_text,
-        tailored_resume=response.content,
+        tailored_resume=tailored,
         annotations_enabled=1 if annotations_on else 0,
     )
     db.add(record)
     db.commit()
     db.refresh(record)
-    return {"result": response.content, "success": True, "opt_id": record.id}
+    return {"result": tailored, "success": True, "opt_id": record.id}
+
+
+class FullPipelineRequest(BaseModel):
+    resume_text: str
+    jd_text: str
+    jd_analysis_id: int = None
+    style: str = "professional"
+    candidate_name: str = ""
+
+
+@router.post("/full-pipeline")
+async def start_full_pipeline(request: FullPipelineRequest):
+    """一键全流程：JD分析 → 匹配 → 定制简历 → 求职信（Celery 异步）"""
+    try:
+        from tasks import run_full_pipeline
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="异步任务服务未启动，请使用分步操作（JD分析 → 简历匹配 → 简历定制）",
+        )
+
+    try:
+        import redis as redis_lib
+        r = redis_lib.Redis.from_url(
+            config.REDIS_URL + "/1" if not config.REDIS_URL.endswith("/1") else config.REDIS_URL,
+            socket_connect_timeout=1,
+            socket_timeout=1,
+        )
+        r.ping()
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="消息队列服务不可用，请使用分步操作",
+        )
+
+    task = run_full_pipeline.delay(
+        resume_text=request.resume_text,
+        jd_text=request.jd_text,
+        jd_analysis_id=request.jd_analysis_id,
+        style=request.style,
+        candidate_name=request.candidate_name,
+    )
+
+    return {"task_id": task.id, "status": "pending"}
+
+
+@router.get("/redis-status")
+def redis_status():
+    """查询 Redis 缓存连接状态"""
+    return get_redis_status()
 
 
 @router.get("/history")

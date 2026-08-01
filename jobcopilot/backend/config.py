@@ -21,20 +21,17 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "glm-5.2")
 
-# 数据库配置
+# 数据库配置（默认 SQLite，本地演示用；部署时设 DATABASE_URL 环境变量切换 MySQL）
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "mysql+pymysql://{user}:{password}@{host}:{port}/{db}".format(
-        user=os.getenv("MYSQL_USER", "root"),
-        password=os.getenv("MYSQL_PASSWORD", "root123456"),
-        host=os.getenv("MYSQL_HOST", "localhost"),
-        port=os.getenv("MYSQL_PORT", "3306"),
-        db=os.getenv("MYSQL_DATABASE", "jobcopilot"),
-    ),
+    f"sqlite:///{os.path.join(BASE_DIR, 'data', 'jobcopilot.db')}",
 )
 
 # ChromaDB配置
 CHROMA_DIR = os.getenv("CHROMA_DIR", os.path.join(BASE_DIR, "data", "chroma_db"))
+
+# Redis 配置（缓存 + Celery 消息队列）
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
 # CORS配置
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")

@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # 日志
     log_dir: str = "./logs"
 
+    # 访问密码（空 = 不需要密码）
+    access_password: str = ""
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

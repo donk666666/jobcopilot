@@ -3,7 +3,7 @@ import uuid
 from pathlib import Path
 
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_classic.text_splitter import RecursiveCharacterTextSplitter
 from app.rag.vectorstore import get_or_create_collection
 
 
