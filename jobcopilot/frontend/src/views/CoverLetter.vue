@@ -80,14 +80,20 @@ function reset() { step.value = 1; result.value = ''; error.value = ''; }
 
     <!-- Steps -->
     <div class="steps-bar">
-      <div class="step-dot" :class="{ active: step >= 1, done: step > 1 }">1</div>
-      <div class="step-line" :class="{ active: step > 1 }"></div>
-      <div class="step-dot" :class="{ active: step >= 2, done: step > 2 }">2</div>
-      <div class="step-line" :class="{ active: step > 2 }"></div>
-      <div class="step-dot" :class="{ active: step >= 3, done: step > 3 }">3</div>
-      <span class="step-label s1" :class="{ active: step === 1 }">填写信息</span>
-      <span class="step-label s2" :class="{ active: step === 2 }">选择风格</span>
-      <span class="step-label s3" :class="{ active: step >= 3 }">生成结果</span>
+      <div class="step-item">
+        <div class="step-dot" :class="{ active: step >= 1, done: step > 1 }">1</div>
+        <span class="step-label" :class="{ active: step === 1 }">填写信息</span>
+      </div>
+      <div class="step-item-center" style="flex: 1"><div class="step-line" :class="{ active: step > 1 }"></div></div>
+      <div class="step-item">
+        <div class="step-dot" :class="{ active: step >= 2, done: step > 2 }">2</div>
+        <span class="step-label" :class="{ active: step === 2 }">选择风格</span>
+      </div>
+      <div class="step-item-center" style="flex: 1"><div class="step-line" :class="{ active: step > 2 }"></div></div>
+      <div class="step-item">
+        <div class="step-dot" :class="{ active: step >= 3, done: step > 3 }">3</div>
+        <span class="step-label" :class="{ active: step >= 3 }">生成结果</span>
+      </div>
     </div>
 
     <!-- Step 1: Input -->
@@ -173,12 +179,16 @@ function reset() { step.value = 1; result.value = ''; error.value = ''; }
 </template>
 
 <style scoped>
-.cover-page { max-width: 900px; }
+.cover-page { max-width: 640px; margin: 0 auto; }
 .page-title { margin-bottom: 4px; }
 .page-sub { color: var(--text-muted); font-size: 13px; }
 
 /* Steps */
-.steps-bar { display: flex; align-items: center; margin: 28px 0 32px; position: relative; }
+.steps-bar { display: flex; align-items: flex-start; justify-content: space-between; margin: 28px 0 32px; min-height: 60px; }
+.step-item { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.step-item-center { flex: 1; display: flex; align-items: center; justify-content: center; padding-top: 18px; }
+.step-line { width: 100%; height: 2px; background: var(--border-input); transition: background var(--t-normal) ease; }
+.step-line.active { background: var(--accent); }
 .step-dot {
   width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--border-input);
   display: flex; align-items: center; justify-content: center;
@@ -187,13 +197,8 @@ function reset() { step.value = 1; result.value = ''; error.value = ''; }
 }
 .step-dot.active { border-color: var(--accent); color: var(--accent); }
 .step-dot.done { background: var(--accent); border-color: var(--accent); color: #ffffff; }
-.step-line { flex: 1; height: 2px; background: var(--border-input); margin: 0 12px; transition: background var(--t-normal) ease; }
-.step-line.active { background: var(--accent); }
-.step-label { position: absolute; top: 42px; font-size: 12px; color: var(--text-muted); transform: translateX(-50%); transition: color var(--t-fast) ease; }
+.step-label { font-size: 12px; color: var(--text-muted); white-space: nowrap; transition: color var(--t-fast) ease; }
 .step-label.active { color: var(--accent); }
-.s1 { left: calc(18px); }
-.s2 { left: calc(50% - 18px); }
-.s3 { left: calc(100% - 18px); }
 
 .step-content { animation: fade-slide-enter 0.3s ease-out; }
 @keyframes fade-slide-enter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }

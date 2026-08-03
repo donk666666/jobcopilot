@@ -158,3 +158,34 @@ export function saveActiveResume(resumeText: string) {
 export function healthCheck() {
   return api.get('/health')
 }
+
+// 简历文件上传
+export function uploadResume(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.post('/resume/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 30000,
+  })
+}
+
+// 一键全流程
+export function submitFullPipeline(data: {
+  resume_text: string
+  jd_text: string
+  jd_analysis_id?: number
+  style?: string
+  candidate_name?: string
+}) {
+  return api.post('/resume/full-pipeline', data)
+}
+
+// 查询异步任务状态
+export function getTaskStatus(taskId: string) {
+  return api.get(`/task/${taskId}`)
+}
+
+// Redis 状态
+export function getRedisStatus() {
+  return api.get('/resume/redis-status')
+}

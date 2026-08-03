@@ -1,15 +1,19 @@
 import logging
 import os
+import json
+import hashlib
+import secrets
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, UploadFile, File, Request, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import FastAPI, UploadFile, File, Request, HTTPException, Depends
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 from app.config import settings
-from app.agent.graph import run_agent
+from app.agent.graph import run_agent, run_agent_stream
 from app.rag.loader import index_document, index_directory
 from app.rag.vectorstore import get_or_create_collection
 from app.crawler.feed import fetch_feeds, start_scheduler
@@ -51,6 +55,32 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 store = SessionStore()
 
+# --- 认证 ---
+
+_auth_tokens: set[str] = set()
+_bearer = HTTPBearer(auto_error=False)
+
+
+def _hash_password(password: str) -> str:
+    secret_salt = settings.llm_api_key[:16] if settings.llm_api_key else "smart-doc-qa-salt"
+    return hashlib.sha256((password + secret_salt).encode()).hexdigest()
+
+
+def _generate_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _require_auth(credentials: HTTPAuthorizationCredentials = Depends(_bearer)):
+    """认证依赖：无密码时放行，有密码时校验 Bearer token"""
+    if not settings.access_password:
+        return
+    if not credentials or credentials.credentials not in _auth_tokens:
+        raise HTTPException(status_code=401, detail="未认证，请先输入访问密码")
+
+
+class AuthRequest(BaseModel):
+    password: str
+
 
 # --- 模型 ---
 
@@ -76,8 +106,19 @@ async def health():
     return {"status": "healthy", "version": "1.0.0"}
 
 
+@app.post("/api/auth")
+async def auth(req: AuthRequest):
+    if not settings.access_password:
+        return {"token": "", "need_auth": False}
+    if _hash_password(req.password) == _hash_password(settings.access_password):
+        token = _generate_token()
+        _auth_tokens.add(token)
+        return {"token": token, "need_auth": True}
+    raise HTTPException(status_code=401, detail="密码错误")
+
+
 @app.post("/api/chat")
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, _=Depends(_require_auth)):
     user_id = req.user_id or "default"
     history = store.get_history(req.session_id, user_id)
 
@@ -89,7 +130,8 @@ async def chat(req: ChatRequest):
     result = run_agent(req.message, context=context_msgs)
 
     store.add_message(req.session_id, user_id, "user", req.message)
-    store.add_message(req.session_id, user_id, "assistant", result["answer"])
+    store.add_message(req.session_id, user_id, "assistant", result["answer"],
+                      json.dumps(result.get("sources", []), ensure_ascii=False))
 
     return {
         "reply": result["answer"],
@@ -98,15 +140,56 @@ async def chat(req: ChatRequest):
     }
 
 
+@app.post("/api/chat/stream")
+async def chat_stream(req: ChatRequest, _=Depends(_require_auth)):
+    """SSE 流式对话端点：实时播报步骤进度"""
+    user_id = req.user_id or "default"
+    history = store.get_history(req.session_id, user_id)
+
+    if not history:
+        title = req.message[:20].replace("\n", " ")
+        store.create_session(req.session_id, user_id, title)
+
+    context_msgs, _ = build_context(req.session_id, user_id, store, history)
+
+    store.add_message(req.session_id, user_id, "user", req.message)
+
+    async def event_stream():
+        full_answer = ""
+        full_sources = []
+
+        async for node_name, data in run_agent_stream(req.message, context=context_msgs):
+            if node_name == "__done__":
+                full_answer = data["answer"]
+                full_sources = data["sources"]
+                yield f"event: answer\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+            elif node_name == "__init__":
+                yield f"event: init\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+            else:
+                yield f"event: step\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+        store.add_message(req.session_id, user_id, "assistant", full_answer,
+                          json.dumps(full_sources, ensure_ascii=False))
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.get("/api/sessions")
-async def list_sessions(user_id: str = ""):
+async def list_sessions(user_id: str = "", _=Depends(_require_auth)):
     uid = user_id or "default"
     sessions = store.list_sessions(uid)
     return {"sessions": sessions}
 
 
 @app.get("/api/sessions/{session_id}")
-async def get_session(session_id: str, user_id: str = ""):
+async def get_session(session_id: str, user_id: str = "", _=Depends(_require_auth)):
     uid = user_id or "default"
     session = store.get_session(session_id, uid)
     if not session:
@@ -115,8 +198,17 @@ async def get_session(session_id: str, user_id: str = ""):
     return {"session": session, "messages": messages}
 
 
+class RenameRequest(BaseModel):
+    title: str
+
+@app.put("/api/sessions/{session_id}")
+async def rename_session(session_id: str, req: RenameRequest, user_id: str = "", _=Depends(_require_auth)):
+    uid = user_id or "default"
+    store.update_title(session_id, uid, req.title)
+    return {"status": "ok", "title": req.title}
+
 @app.delete("/api/sessions/{session_id}")
-async def delete_session(session_id: str, user_id: str = ""):
+async def delete_session(session_id: str, user_id: str = "", _=Depends(_require_auth)):
     uid = user_id or "default"
     store.delete_session(session_id, uid)
     return {"status": "ok"}

@@ -452,45 +452,266 @@ def eval_cover_letter():
 # 汇总报告
 # ============================================================
 
-def print_summary(jd_results, match_results, tailor_results, cover_results):
-    print("\n\n" + "=" * 60)
-    print("整体评估汇总")
+# ============================================================
+# 5. 端到端流水线延迟
+# ============================================================
+
+def eval_e2e_pipeline():
+    """完整的 JD分析 → 简历匹配 → 简历改写 → 求职信 流水线延迟"""
+    print("\n" + "=" * 60)
+    print("[5] 端到端流水线评估")
     print("=" * 60)
 
-    print(f"\n  JD 分析:    JSON有效性={sum(1 for r in jd_results if r['json_valid'])}/{len(jd_results)}"
-          f" | 技能召回={sum(r['skill_recall'] for r in jd_results)/len(jd_results):.0%}"
-          f" | 平均{sum(r['elapsed'] for r in jd_results)/len(jd_results):.1f}s")
-
-    print(f"  简历匹配:   JSON有效性={sum(1 for r in match_results if r['json_valid'])}/{len(match_results)}"
-          f" | 方向正确={sum(1 for r in match_results if r['direction_ok'])}/{len(match_results)}"
-          f" | 平均{sum(r['elapsed'] for r in match_results)/len(match_results):.1f}s")
-
-    print(f"  简历改写:   长度合格={sum(1 for r in tailor_results if r['len_ok'])}/{len(tailor_results)}"
-          f" | 关键词覆盖={sum(r['kw_rate'] for r in tailor_results)/len(tailor_results):.0%}"
-          f" | 平均{sum(r['elapsed'] for r in tailor_results)/len(tailor_results):.1f}s")
-
-    print(f"  求职信:     格式规范={sum(r['format_score'] for r in cover_results)/len(cover_results):.0%}"
-          f" | 平均{sum(r['elapsed'] for r in cover_results)/len(cover_results):.1f}s")
-
-    # 整体性能
-    all_times = (
-        [r["elapsed"] for r in jd_results]
-        + [r["elapsed"] for r in match_results]
-        + [r["elapsed"] for r in tailor_results]
-        + [r["elapsed"] for r in cover_results]
+    from langchain_openai import ChatOpenAI
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from prompts.jd_analyzer import JD_ANALYZER_SYSTEM, JD_ANALYZER_USER_TEMPLATE
+    from prompts.resume_tailor import (
+        RESUME_MATCH_SYSTEM, RESUME_MATCH_USER_TEMPLATE,
+        RESUME_TAILOR_SYSTEM, RESUME_TAILOR_USER_TEMPLATE,
     )
-    print(f"\n  整体耗时: 平均{sum(all_times)/len(all_times):.1f}s | "
-          f"最短{min(all_times):.1f}s | 最长{max(all_times):.1f}s | "
-          f"总{sum(all_times):.1f}s ({len(all_times)}次LLM调用)")
+    from prompts.cover_letter import COVER_LETTER_SYSTEM, STYLE_OPTIONS
 
+    llm = ChatOpenAI(
+        api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL,
+        model=DEEPSEEK_MODEL, temperature=0.3,
+    )
+
+    jd_text = JD_TEST_CASES[0]["jd_text"]
+    resume_text = TAILOR_TEST_CASES[0]["resume_text"]
+
+    stages = {}
+    t_pipeline = time.time()
+
+    # Stage 1: JD 分析
+    t0 = time.time()
+    resp = llm.invoke([
+        SystemMessage(content=JD_ANALYZER_SYSTEM),
+        HumanMessage(content=JD_ANALYZER_USER_TEMPLATE.format(jd_text=jd_text)),
+    ])
+    stages["JD分析"] = round(time.time() - t0, 2)
+    jd_analysis = resp.content
+
+    # Stage 2: 简历匹配
+    t0 = time.time()
+    resp = llm.invoke([
+        SystemMessage(content=RESUME_MATCH_SYSTEM),
+        HumanMessage(content=RESUME_MATCH_USER_TEMPLATE.format(
+            jd_analysis=jd_analysis, resume_text=resume_text, rag_context="(无)")),
+    ])
+    stages["简历匹配"] = round(time.time() - t0, 2)
+    match_result = resp.content[:500]
+
+    # Stage 3: 简历改写
+    t0 = time.time()
+    resp = llm.invoke([
+        SystemMessage(content=RESUME_TAILOR_SYSTEM),
+        HumanMessage(content=RESUME_TAILOR_USER_TEMPLATE.format(
+            jd_analysis=jd_analysis, match_result=match_result, resume_text=resume_text)),
+    ])
+    stages["简历改写"] = round(time.time() - t0, 2)
+
+    # Stage 4: 求职信
+    t0 = time.time()
+    full_prompt = f"""请生成一封正式商务风格的求职信。
+
+目标职位JD：{jd_text[:500]}
+候选人简历：{resume_text[:500]}
+候选人姓名：张三
+收信人：招聘负责人"""
+    resp = llm.invoke([
+        SystemMessage(content=COVER_LETTER_SYSTEM),
+        HumanMessage(content=full_prompt),
+    ])
+    stages["求职信"] = round(time.time() - t0, 2)
+
+    total = round(time.time() - t_pipeline, 2)
+
+    for name, s in stages.items():
+        print(f"  {name}: {s}s")
+    print(f"  {'─' * 20}")
+    print(f"  总耗时: {total}s")
+    print(f"  LLM 调用次数: 4 次")
+
+    return {"stages": stages, "total": total}
+
+
+# ============================================================
+# 6. 批量吞吐测试
+# ============================================================
+
+def eval_batch_throughput():
+    """批量 JD 处理，计算每分钟处理量"""
+    print("\n" + "=" * 60)
+    print("[6] 批量吞吐测试")
+    print("=" * 60)
+
+    from langchain_openai import ChatOpenAI
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from prompts.jd_analyzer import JD_ANALYZER_SYSTEM, JD_ANALYZER_USER_TEMPLATE
+
+    llm = ChatOpenAI(
+        api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL,
+        model=DEEPSEEK_MODEL, temperature=0.1,
+    )
+
+    # 用现有测试集跑
+    jd_texts = [tc["jd_text"] for tc in JD_TEST_CASES]
+    latencies = []
+    success = 0
+
+    t_start = time.time()
+    for jd in jd_texts:
+        t0 = time.time()
+        try:
+            resp = llm.invoke([
+                SystemMessage(content=JD_ANALYZER_SYSTEM),
+                HumanMessage(content=JD_ANALYZER_USER_TEMPLATE.format(jd_text=jd)),
+            ])
+            json.loads(resp.content)
+            success += 1
+        except Exception:
+            pass
+        latencies.append(time.time() - t0)
+
+    total = time.time() - t_start
+    throughput = len(jd_texts) / (total / 60) if total > 0 else 0
+    avg_latency = sum(latencies) / len(latencies) if latencies else 0
+
+    print(f"  处理 JD 数: {len(jd_texts)}")
+    print(f"  成功: {success}/{len(jd_texts)}")
+    print(f"  总耗时: {total:.1f}s")
+    print(f"  吞吐量: {throughput:.1f} JDs/min")
+    print(f"  平均延迟: {avg_latency:.1f}s/个")
+
+    return {"count": len(jd_texts), "success": success, "total_s": round(total, 1),
+            "throughput_per_min": round(throughput, 1), "avg_latency_s": round(avg_latency, 1)}
+
+
+# ============================================================
+# 7. 跨测试一致性
+# ============================================================
+
+def eval_cross_test_stability(n_runs: int = 3):
+    """同一输入跑 N 次，检查输出稳定性"""
+    print("\n" + "=" * 60)
+    print(f"[7] 跨测试一致性 (同一JD x {n_runs}次)")
+    print("=" * 60)
+
+    from langchain_openai import ChatOpenAI
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from prompts.jd_analyzer import JD_ANALYZER_SYSTEM, JD_ANALYZER_USER_TEMPLATE
+
+    llm = ChatOpenAI(
+        api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL,
+        model=DEEPSEEK_MODEL, temperature=0.1,
+    )
+
+    jd_text = JD_TEST_CASES[0]["jd_text"]
+    positions, skills_list, years = [], [], []
+
+    for run_i in range(n_runs):
+        resp = llm.invoke([
+            SystemMessage(content=JD_ANALYZER_SYSTEM),
+            HumanMessage(content=JD_ANALYZER_USER_TEMPLATE.format(jd_text=jd_text)),
+        ])
+        try:
+            parsed = json.loads(resp.content)
+            positions.append(parsed.get("position_title", ""))
+            skills_list.append(set(s.lower() for s in parsed.get("hard_skills", [])))
+            y = parsed.get("experience_years")
+            if y is not None:
+                years.append(float(y))
+        except json.JSONDecodeError:
+            positions.append("PARSE_ERROR")
+            skills_list.append(set())
+
+    # 职位名一致性
+    pos_identical = len(set(positions)) == 1
+    print(f"  职位名: {'✓ 完全一致' if pos_identical else '✗ 不一致'} ({', '.join(set(positions))})")
+
+    # 技能 Jaccard 相似度
+    if len(skills_list) >= 2:
+        jaccards = []
+        for i in range(len(skills_list)):
+            for j in range(i + 1, len(skills_list)):
+                a, b = skills_list[i], skills_list[j]
+                jac = len(a & b) / len(a | b) if (a | b) else 0
+                jaccards.append(jac)
+        avg_jaccard = sum(jaccards) / len(jaccards)
+        print(f"  技能集 Jaccard 相似度: {avg_jaccard:.2f} ({[sorted(s) for s in skills_list]})")
+
+    # 经验年数稳定性
+    if years:
+        import statistics
+        print(f"  经验年数: {statistics.mean(years):.1f} ± {statistics.stdev(years):.2f}" if len(years) > 1
+              else f"  经验年数: {years[0]:.1f}")
+
+    # 综合稳定性评分
+    stability = (1.0 if pos_identical else 0.0)
+    if skills_list and jaccards:
+        stability += avg_jaccard
+    if years and len(years) > 1:
+        cv = statistics.stdev(years) / statistics.mean(years) if statistics.mean(years) else 0
+        stability += max(0, 1 - cv)
+    stability /= 3.0
+
+    print(f"\n  综合稳定性: {stability:.2f}/1.0")
+
+    return {"stability": round(stability, 2), "pos_identical": pos_identical,
+            "skill_jaccard": round(avg_jaccard, 2) if 'avg_jaccard' in dir() else 0}
+
+
+# ============================================================
+# 8. 统一健康报告
+# ============================================================
+
+def eval_health_dashboard():
+    """运行所有评估并输出统一仪表盘"""
+    print("\n\n" + "=" * 65)
+    print("  JobCopilot 综合健康报告")
+    print(f"  {time.strftime('%Y-%m-%d %H:%M:%S')}  |  模型: {DEEPSEEK_MODEL}")
+    print("=" * 65)
+
+    # 运行各模块评估
+    jd_results = eval_jd_analysis()
+    match_results = eval_resume_match()
+    tailor_results = eval_resume_tailor()
+    cover_results = eval_cover_letter()
+    e2e = eval_e2e_pipeline()
+    batch = eval_batch_throughput()
+    stability = eval_cross_test_stability(n_runs=3)
+
+    # 计算总分
+    n = len(jd_results)
+    jd_score = (sum(1 for r in jd_results if r["json_valid"]) / n * 40
+                + sum(r["skill_recall"] for r in jd_results) / n * 30
+                + sum(r["field_rate"] for r in jd_results) / n * 30)
+    match_score = (sum(1 for r in match_results if r["direction_ok"]) / len(match_results) * 50
+                   + sum(r["field_rate"] for r in match_results) / len(match_results) * 50)
+    tailor_score = (sum(r["kw_rate"] for r in tailor_results) / len(tailor_results) * 60
+                    + sum(1 for r in tailor_results if r["len_ok"]) / len(tailor_results) * 40)
+    cover_score = (sum(r["format_score"] for r in cover_results) / len(cover_results) * 70
+                   + sum(1 for r in cover_results if r["len_ok"]) / len(cover_results) * 30)
+
+    overall = (jd_score * 0.25 + match_score * 0.25 + tailor_score * 0.20
+               + cover_score * 0.15 + stability["stability"] * 100 * 0.15)
+
+    grade = "A" if overall >= 85 else ("B+" if overall >= 75 else ("B" if overall >= 65 else "C"))
+
+    print(f"\n{'─' * 65}")
+    print(f"  综合评分: {overall:.0f}/100  评级: {grade}")
+    print(f"{'=' * 65}")
+
+    return {"overall": round(overall, 1), "grade": grade}
+
+
+# ============================================================
+# 主入口
+# ============================================================
 
 if __name__ == "__main__":
     print("JobCopilot 量化评估")
     print(f"模型: {DEEPSEEK_MODEL} | API: {DEEPSEEK_BASE_URL}")
     print()
 
-    jd_results = eval_jd_analysis()
-    match_results = eval_resume_match()
-    tailor_results = eval_resume_tailor()
-    cover_results = eval_cover_letter()
-    print_summary(jd_results, match_results, tailor_results, cover_results)
+    eval_health_dashboard()

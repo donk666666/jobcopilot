@@ -71,6 +71,11 @@ class SessionStore:
     def _migrate(self):
         """处理表结构变更"""
         with self._lock, self._get_conn() as conn:
+            # 检查是否需要添加 sources 列
+            msg_cols = {r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()}
+            if "sources" not in msg_cols:
+                conn.execute("ALTER TABLE messages ADD COLUMN sources TEXT NOT NULL DEFAULT ''")
+
             # 检查是否需要添加 user_id 列
             cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()}
             if "user_id" not in cols:
@@ -186,14 +191,14 @@ class SessionStore:
 
     # ---- 消息 CRUD ----
 
-    def add_message(self, session_id: str, user_id: str, role: str, content: str) -> int:
+    def add_message(self, session_id: str, user_id: str, role: str, content: str, sources: str = "") -> int:
         with self._lock:
             self._ensure_session_locked(session_id, user_id)
             with self._get_conn() as conn:
                 now = _now()
                 cur = conn.execute(
-                    "INSERT INTO messages (session_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (session_id, user_id, role, content, now),
+                    "INSERT INTO messages (session_id, user_id, role, content, sources, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (session_id, user_id, role, content, sources, now),
                 )
                 conn.execute(
                     "UPDATE sessions SET updated_at = ? WHERE id = ? AND user_id = ?",
@@ -213,10 +218,14 @@ class SessionStore:
     def get_history(self, session_id: str, user_id: str) -> list[dict]:
         with self._get_conn() as conn:
             rows = conn.execute(
-                "SELECT id, role, content FROM messages WHERE session_id = ? AND user_id = ? ORDER BY id ASC",
+                "SELECT id, role, content, sources FROM messages WHERE session_id = ? AND user_id = ? ORDER BY id ASC",
                 (session_id, user_id),
             ).fetchall()
-            return [{"id": r["id"], "role": r["role"], "content": r["content"]} for r in rows]
+            result = [{"id": r["id"], "role": r["role"], "content": r["content"]} for r in rows]
+            for i, r in enumerate(rows):
+                if r["sources"]:
+                    result[i]["sources"] = r["sources"]
+            return result
 
     def get_last_message_idx(self, session_id: str, user_id: str) -> int:
         with self._get_conn() as conn:

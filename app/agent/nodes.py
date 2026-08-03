@@ -1,6 +1,6 @@
 import json
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from app.config import settings
 from app.rag.retriever import hybrid_search
 from app.agent import AgentState
@@ -92,37 +92,43 @@ def judge_relevance(state: AgentState) -> dict:
 def generate(state: AgentState) -> dict:
     """
     基于检索结果生成回答。
-    context 已由 memory.build_context 预处理：
-    - system 消息（含历史摘要，如有）
-    - 窗口内最近 10 轮完整消息
-    - 当前用户消息在末尾
-    此处不再重复截取历史，直接使用 state["messages"]。
+    context 已由 memory.build_context 预处理。
     """
     user_msg = _get_last_user_message(state)
     docs = state.get("retrieved_docs", [])
 
+    # 动态选文档：分数 >= 0.5 的优先，至少 1 篇，最多 5 篇
+    qualified = [d for d in docs if d["score"] >= 0.5]
+    selected = (qualified or docs[:1])[:5]
+
     contexts = "\n---\n".join(
-        f"[来源: {d['source']}]\n{d['content']}"
-        for d in docs[:2]
+        f"[来源: {d['source']} (相关度: {d['score']:.2f})]\n{d['content']}"
+        for d in selected
     )
 
-    llm = create_llm(temperature=0.5)
-    system = SystemMessage(content=f"""你是一个技术文档问答助手。根据以下检索到的文档片段回答用户问题。
+    # 非技术问题时用更宽松的 prompt
+    is_tech = state.get("intent") == "tech"
+    if is_tech or docs:
+        system_prompt = f"""你是智能文档助手，一个帮助用户查询技术文档的 AI 助手。如果用户询问你的身份或名字，回答你是"智能文档助手"。你根据以下检索到的文档片段回答用户问题。
 
 规则：
 - 只回答用户最新的问题，不要重复或整合对话历史中已出现过的话题和内容
 - 每个回答独立、干净，历史对话仅用于理解上下文（如代词指代），不用于拼凑答案
 - 回答基于文档内容，不要编造信息
 - 如果文档信息不足以完整回答，诚实说明
+- 当回答涉及对比、参数、规格、步骤、适用场景等多维信息时，优先使用 markdown 表格组织内容，表格需有清晰的列名
 - 回答末尾引用来源文件名
 - 使用中文回答
 
 文档片段：
-{contexts}""")
+{contexts}"""
+    else:
+        system_prompt = """你是智能文档助手，一个友好的 AI 助手。用简洁自然的中文回答用户的问题。"""
 
-    # 使用 memory 模块预处理好的上下文消息（已含摘要 + 窗口）
+    llm = create_llm(temperature=0.5)
+    system = SystemMessage(content=system_prompt)
+
     all_msgs = [m for m in state["messages"] if isinstance(m, dict)]
-    # 去掉最后一条用户消息（即当前问题），避免和后面的 HumanMessage(user_msg) 重复
     if all_msgs and all_msgs[-1]["role"] == "user":
         all_msgs = all_msgs[:-1]
     chat_msgs = []
@@ -130,12 +136,20 @@ def generate(state: AgentState) -> dict:
         if m["role"] == "system":
             chat_msgs.append(SystemMessage(content=m["content"]))
         elif m["role"] == "assistant":
-            chat_msgs.append(SystemMessage(content=m["content"]))
+            chat_msgs.append(AIMessage(content=m["content"]))
         else:
             chat_msgs.append(HumanMessage(content=m["content"]))
-    resp = llm.invoke([system] + chat_msgs + [HumanMessage(content=user_msg)])
 
-    return {"final_answer": resp.content, "rewritten_query": user_msg}
+    resp = llm.invoke([system] + chat_msgs + [HumanMessage(content=user_msg)])
+    answer = resp.content
+
+    # 验证：确保回答引用了至少一个来源
+    if selected:
+        mentioned = any(d["source"].replace(".md", "").replace(".txt", "") in answer for d in selected)
+        if not mentioned:
+            answer += "\n\n> 参考来源：" + "、".join(d["source"] for d in selected)
+
+    return {"final_answer": answer, "rewritten_query": user_msg}
 
 
 def clarify(state: AgentState) -> dict:

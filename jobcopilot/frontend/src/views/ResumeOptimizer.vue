@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
-import { matchResume, tailorResume, getJDAnalyses, getResumeOptimizations, getActiveResume, saveActiveResume } from '@/api'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { matchResume, tailorResume, getJDAnalyses, getResumeOptimizations, getActiveResume, saveActiveResume, uploadResume, submitFullPipeline, getTaskStatus } from '@/api'
 import RadarChart from '@/components/RadarChart.vue'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 
@@ -21,6 +21,147 @@ const optHistory = ref<any[]>([])
 const showAnnotations = ref(true)
 
 const lastMatchedForTailor = ref('')
+
+// 文件上传
+const uploadLoading = ref(false)
+const uploadedFile = ref<{ name: string; char_count: number } | null>(null)
+const uploadRef = ref<any>(null)
+
+// 一键全流程
+const pipelineRunning = ref(false)
+const pipelineTaskId = ref('')
+const pipelineStatus = ref('')
+const pipelineProgress = ref(0)
+const pipelineStep = ref('')
+const pipelineError = ref('')
+let pollTimer: ReturnType<typeof setInterval> | null = null
+let pollFailCount = 0
+let pollTimeoutTimer: ReturnType<typeof setTimeout> | null = null
+const PIPELINE_STEPS = [
+  { key: 'ANALYZING_JD', label: '分析JD' },
+  { key: 'MATCHING', label: '匹配简历' },
+  { key: 'TAILORING', label: '定制简历' },
+  { key: 'WRITING_LETTER', label: '生成求职信' },
+]
+const currentStepIndex = computed(() => {
+  const idx = PIPELINE_STEPS.findIndex(s => s.key === pipelineStatus.value)
+  return idx >= 0 ? idx : (pipelineStatus.value === 'SUCCESS' ? 4 : 0)
+})
+
+// ---- 文件上传处理 ----
+async function handleFileChange(file: any) {
+  uploadLoading.value = true
+  error.value = ''
+  uploadedFile.value = null
+  try {
+    const res: any = await uploadResume(file.raw)
+    resumeText.value = res.text
+    uploadedFile.value = { name: res.filename, char_count: res.char_count }
+    try { await saveActiveResume(res.text) } catch { /* ignore */ }
+  } catch (e: any) {
+    error.value = e?.response?.data?.detail || e.message || '文件解析失败'
+  } finally {
+    uploadLoading.value = false
+    uploadRef.value?.clearFiles()
+  }
+}
+
+function beforeUpload(file: any) {
+  const valid = ['.docx', '.pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/pdf']
+  const ext = '.' + file.name.split('.').pop()?.toLowerCase()
+  if (!valid.includes(file.type) && !valid.includes(ext)) {
+    error.value = '仅支持 .docx 和 .pdf 格式文件'
+    return false
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    error.value = '文件大小不能超过 5MB'
+    return false
+  }
+  return true
+}
+
+// ---- 一键全流程 ----
+async function handleFullPipeline() {
+  if (!resumeText.value.trim() || !jdAnalysisText.value.trim()) {
+    error.value = '请先上传简历并选择JD分析结果'
+    return
+  }
+  pipelineRunning.value = true
+  pipelineError.value = ''
+  pipelineProgress.value = 0
+  pipelineStep.value = ''
+  pipelineStatus.value = ''
+  pollFailCount = 0
+  try {
+    const res: any = await submitFullPipeline({
+      resume_text: resumeText.value,
+      jd_text: jdAnalysisText.value,
+      jd_analysis_id: selectedJdId.value || undefined,
+      style: 'professional',
+    })
+    pipelineTaskId.value = res.task_id
+    pipelineStatus.value = 'PENDING'
+    startPolling()
+  } catch (e: any) {
+    pipelineError.value = e?.response?.data?.detail || e.message || '提交失败'
+    pipelineRunning.value = false
+  }
+}
+
+function startPolling() {
+  stopPolling()
+  // 5 分钟超时保护
+  pollTimeoutTimer = setTimeout(() => {
+    stopPolling()
+    pipelineRunning.value = false
+    pipelineError.value = '全流程超时（5分钟），请检查后端服务'
+  }, 5 * 60 * 1000)
+  pollTimer = setInterval(async () => {
+    try {
+      const res: any = await getTaskStatus(pipelineTaskId.value)
+      pipelineStatus.value = res.status
+      pipelineProgress.value = res.progress || pipelineProgress.value
+      pipelineStep.value = res.step || pipelineStep.value
+      pollFailCount = 0
+      if (res.status === 'SUCCESS') {
+        stopPolling()
+        pipelineRunning.value = false
+        if (res.result) {
+          if (res.result.dimension_scores) {
+            matchResult.value = {
+              overall_score: res.result.output,
+              match_score: Object.values(res.result.dimension_scores as Record<string, number>).reduce((a: number, b: number) => a + b, 0) / 4,
+              dimension_scores: res.result.dimension_scores,
+              contradictions: res.result.contradictions,
+            }
+          }
+          if (res.result.output) {
+            tailoredResult.value = typeof res.result.output === 'string' ? res.result.output : JSON.stringify(res.result.output, null, 2)
+          }
+        }
+        loadHistory()
+      } else if (res.status === 'FAILURE') {
+        stopPolling()
+        pipelineRunning.value = false
+        pipelineError.value = res.error || '全流程执行失败'
+      }
+    } catch {
+      pollFailCount++
+      if (pollFailCount >= 3) {
+        stopPolling()
+        pipelineRunning.value = false
+        pipelineError.value = '轮询任务状态失败，请检查服务状态'
+      }
+    }
+  }, 2000)
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  if (pollTimeoutTimer) { clearTimeout(pollTimeoutTimer); pollTimeoutTimer = null }
+}
+
+onUnmounted(() => stopPolling())
 
 async function loadHistory() {
   historyLoading.value = true
@@ -134,7 +275,34 @@ const radarReady = computed(() => Object.keys(radarData.value).length >= 3)
       <el-col :span="7">
         <div class="input-card">
           <h4 class="card-header">简历文本</h4>
-          <el-input v-model="resumeText" type="textarea" :rows="8" placeholder="粘贴你的简历全文..." />
+          <el-upload
+            ref="uploadRef"
+            drag
+            :auto-upload="false"
+            :before-upload="beforeUpload"
+            :on-change="handleFileChange"
+            :show-file-list="false"
+            accept=".docx,.pdf"
+            style="margin-bottom: 12px"
+          >
+            <div class="upload-area" :class="{ uploading: uploadLoading }">
+              <el-icon v-if="!uploadLoading" class="el-icon--upload"><i class="fa fa-cloud-upload" style="font-size: 28px; color: var(--text-muted)" /></el-icon>
+              <el-icon v-else class="is-loading"><i class="fa fa-spinner fa-pulse" style="font-size: 28px; color: var(--accent)" /></el-icon>
+              <div class="el-upload__text">
+                <template v-if="!uploadLoading">
+                  拖拽文件到此处，或 <em>点击选择</em>
+                </template>
+                <template v-else>
+                  正在解析文件...
+                </template>
+              </div>
+              <div class="el-upload__tip">支持 .docx / .pdf，最大 5MB</div>
+            </div>
+          </el-upload>
+          <div v-if="uploadedFile" class="upload-success">
+            <i class="fa fa-check-circle" style="color: var(--color-success)" /> {{ uploadedFile.name }} ({{ uploadedFile.char_count }} 字)
+          </div>
+          <el-input v-model="resumeText" type="textarea" :rows="8" placeholder="粘贴你的简历全文，或上传文件自动填充..." />
         </div>
 
         <div class="input-card">
@@ -157,6 +325,21 @@ const radarReady = computed(() => Object.keys(radarData.value).length >= 3)
           <el-button type="primary" :loading="loading" @click="handleMatch" style="width: 100%; margin-top: 12px" :disabled="!selectedJdId">
             开始匹配分析
           </el-button>
+          <el-button type="success" :loading="pipelineRunning" @click="handleFullPipeline" style="width: 100%; margin-top: 8px" :disabled="!selectedJdId || !resumeText.trim()">
+            一键全流程 (JD分析→匹配→优化→求职信)
+          </el-button>
+
+          <!-- Pipeline 进度 -->
+          <div v-if="pipelineRunning || pipelineError" class="pipeline-progress-card">
+            <div v-if="pipelineRunning" class="pipeline-status">
+              <el-steps :active="currentStepIndex" align-center finish-status="success" process-status="process">
+                <el-step v-for="s in PIPELINE_STEPS" :key="s.key" :title="s.label" />
+              </el-steps>
+              <el-progress :percentage="pipelineProgress" :stroke-width="6" style="margin-top: 12px" />
+              <p v-if="pipelineStep" class="pipeline-step-text">{{ pipelineStep }}</p>
+            </div>
+            <el-alert v-if="pipelineError" :title="pipelineError" type="error" show-icon closable @close="pipelineError = ''" style="margin-top: 8px" />
+          </div>
         </div>
 
         <div v-if="optHistory.length > 0" class="history-card">
@@ -334,4 +517,18 @@ const radarReady = computed(() => Object.keys(radarData.value).length >= 3)
   border-radius: var(--radius-card); min-height: 400px;
   display: flex; align-items: center; justify-content: center;
 }
+
+/* Upload */
+.upload-area { padding: 8px 0; }
+.upload-area.uploading { opacity: 0.7; }
+.upload-success { font-size: 13px; padding: 6px 0; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
+
+/* Pipeline */
+.pipeline-progress-card {
+  margin-top: 12px; padding: 16px;
+  background: var(--bg-deepest); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+}
+.pipeline-status { text-align: center; }
+.pipeline-step-text { margin: 8px 0 0; font-size: 13px; color: var(--text-muted); }
 </style>

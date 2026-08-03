@@ -17,47 +17,139 @@
   .msg-bot h1 { font-size:1.2rem; }
   .msg-bot h2 { font-size:1.1rem; }
   .msg-bot h3 { font-size:1rem; }
+  .msg-bot table { width:100%; border-collapse:collapse; margin:0.5rem 0; font-size:0.8rem; }
+  .msg-bot th { background:#f1f5f9; color:#374151; font-weight:600; padding:0.5rem 0.75rem; text-align:left; border:1px solid #e2e8f0; }
+  .msg-bot td { padding:0.4rem 0.75rem; border:1px solid #e2e8f0; color:#4b5563; }
+  .msg-bot tr:hover td { background:#f8fafc; }
+  /* 步骤播报指示器 */
+  .step-indicator { margin: 12px 0; }
+  .step-track {
+    height: 3px; background: #e5e7eb; border-radius: 2px;
+    margin-bottom: 6px; max-width: 280px;
+  }
+  .step-progress {
+    height: 100%; background: linear-gradient(90deg, #3B82F6, #6366F1);
+    border-radius: 2px; width: 0%; transition: width 0.6s ease;
+  }
+  .step-text { font-size: 12px; color: #6b7280; }
   .sidebar-item { cursor:pointer; border-radius:0.5rem; padding:0.625rem 0.75rem; margin-bottom:0.25rem; transition:background 0.15s; }
   .sidebar-item:hover { background:#f3f4f6; }
   .sidebar-item.active { background:#eff6ff; }
   .sidebar-item .delete-btn { opacity:0; transition:opacity 0.15s; }
   .sidebar-item:hover .delete-btn { opacity:1; }
+  .sidebar-item .rename-btn { opacity:0; transition:opacity 0.15s; margin-right:2px; }
+  .sidebar-item:hover .rename-btn { opacity:0.6; }
+  .sidebar-item .rename-btn:hover { opacity:1; color:#2563eb; }
+  .sidebar-item .time { font-size:0.65rem; color:#9ca3af; }
+  .sidebar-item .edit-title { width:100%; border:1px solid #60a5fa; border-radius:0.25rem; padding:2px 4px; font-size:0.8rem; outline:none; }
+  .guide-card { text-align:center; padding:2rem 1rem; }
+  .guide-card h3 { font-size:1.1rem; font-weight:600; color:#374151; margin-bottom:1.25rem; }
+  .guide-tags { display:flex; flex-wrap:wrap; justify-content:center; gap:0.5rem; max-width:480px; margin:0 auto 1rem; }
+  .guide-tag { display:inline-flex; align-items:center; gap:4px; padding:0.5rem 0.875rem; border-radius:2rem; font-size:0.8rem; cursor:pointer; border:1px solid #e5e7eb; background:#fff; color:#374151; transition:all 0.15s; white-space:nowrap; }
+  .guide-tag:hover { border-color:#60a5fa; background:#eff6ff; color:#2563eb; transform:translateY(-1px); box-shadow:0 2px 8px rgba(37,99,235,0.1); }
+  .guide-tag:active { transform:scale(0.96); background:#dbeafe; }
+  .guide-hint { font-size:0.75rem; color:#9ca3af; }
+  .auth-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.45); backdrop-filter:blur(6px); display:flex; align-items:center; justify-content:center; z-index:100; }
+  .auth-card { background:#fff; border-radius:1rem; padding:2rem; width:360px; max-width:90vw; box-shadow:0 20px 60px rgba(0,0,0,0.15); }
+  .auth-card h2 { font-size:1.2rem; font-weight:600; text-align:center; margin-bottom:0.5rem; }
+  .auth-card p { font-size:0.8rem; color:#9ca3af; text-align:center; margin-bottom:1.25rem; }
+  @media (max-width:768px) {
+    .sidebar { display:none; position:fixed; left:0; top:0; bottom:0; z-index:50; background:#fff; box-shadow:4px 0 20px rgba(0,0,0,0.1); }
+    .sidebar.open { display:flex; }
+    .mobile-menu-btn { display:flex !important; }
+  }
+  .mobile-menu-btn { display:none; }
 </style>
 </head>
-<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
-<div class="w-full max-w-5xl bg-white rounded-2xl shadow-lg flex" style="height: 90vh">
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-0 md:p-4">
+
+<!-- Auth Modal -->
+<div id=authOverlay class="auth-overlay hidden">
+  <div class="auth-card">
+    <i class="fa fa-lock text-3xl text-blue-600 block text-center mb-3"></i>
+    <h2>需要访问密码</h2>
+    <p>请输入密码以使用智能文档问答助手</p>
+    <input id=authPassword type=password placeholder="输入访问密码" autofocus
+     class="w-full border rounded-xl px-4 py-3 mb-3 focus:outline-none focus:ring-2 focus:ring-blue-400 text-sm">
+    <p id=authError class="text-red-500 text-xs mb-3 hidden"></p>
+    <button id=authSubmit class="w-full bg-blue-600 text-white px-4 py-2.5 rounded-xl hover:bg-blue-700 text-sm font-medium">
+      验证
+    </button>
+  </div>
+</div>
+
+<div class="w-full max-w-5xl bg-white md:rounded-2xl shadow-lg flex h-screen md:h-[90vh]">
+
+  <!-- Mobile menu button -->
+  <button id=mobileMenuBtn class="mobile-menu-btn fixed top-3 left-3 z-50 bg-white rounded-lg shadow p-2 items-center justify-center">
+    <i class="fa fa-bars text-xl text-gray-600"></i>
+  </button>
 
   <!-- Sidebar -->
-  <div class="w-64 border-r flex flex-col flex-shrink-0">
+  <div id=sidebar class="sidebar w-64 border-r flex flex-col flex-shrink-0">
     <div class="px-4 py-4 border-b">
       <button id=newChat class="w-full bg-blue-600 text-white px-4 py-2.5 rounded-xl hover:bg-blue-700 text-sm font-medium flex items-center justify-center gap-2">
         <i class="fa fa-plus"></i> 新对话
       </button>
     </div>
     <div id=sessionList class="flex-1 overflow-y-auto px-3 py-2"></div>
+    <div class="px-3 py-3 border-t text-xs text-gray-400">
+      <i class="fa fa-database mr-1"></i><span id=docCount>--</span> 个文档 · <span id=chunkCount>--</span> 个片段
+    </div>
   </div>
 
   <!-- Main chat -->
   <div class="flex-1 flex flex-col min-w-0">
 
     <!-- Header -->
-    <div class="px-6 py-4 border-b flex items-center gap-3">
-      <i class="fa fa-comments-o text-2xl text-blue-600"></i>
+    <div class="px-4 md:px-6 py-3 md:py-4 border-b flex items-center gap-3">
+      <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:32px;height:32px;flex-shrink:0">
+        <defs>
+          <linearGradient id="hdGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#3B82F6"/>
+            <stop offset="100%" stop-color="#6366F1"/>
+          </linearGradient>
+        </defs>
+        <circle cx="20" cy="20" r="20" fill="url(#hdGrad)"/>
+        <rect x="10" y="7" width="14" height="17" rx="2" fill="white" opacity="0.95"/>
+        <rect x="12" y="9" width="10" height="1.5" rx="0.75" fill="#93C5FD"/>
+        <rect x="12" y="12" width="8" height="1.5" rx="0.75" fill="#BFDBFE"/>
+        <rect x="12" y="15" width="6" height="1.5" rx="0.75" fill="#BFDBFE"/>
+        <circle cx="25" cy="24" r="7" fill="#10B981"/>
+        <path d="M23 24l1.5 1.5 3-2.5" stroke="white" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
       <div>
-        <h1 class="text-lg font-semibold">智能文档问答助手</h1>
-        <p class="text-xs text-gray-400">基于 RAG + GLM-5.2</p>
+        <h1 class="text-base md:text-lg font-semibold">智能文档问答助手</h1>
+        <p class="text-xs text-gray-400">基于 RAG + GLM-5.2 · 17 个技术领域</p>
       </div>
     </div>
 
     <!-- Messages -->
-    <div id=messages class="flex-1 overflow-y-auto px-6 py-4 space-y-4"></div>
+    <div id=messages class="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4"></div>
+
+    <!-- Guide card (shown when no messages) -->
+    <div id=guideCard class="guide-card">
+      <h3><i class="fa fa-hand-spock-o mr-1"></i> 我能回答什么？</h3>
+      <div class="guide-tags">
+        <span class="guide-tag" data-q="Docker 怎么查看运行中的容器？"><i class="fa fa-ship"></i> Docker</span>
+        <span class="guide-tag" data-q="FastAPI 怎么创建一个 GET 接口？"><i class="fa fa-bolt"></i> FastAPI</span>
+        <span class="guide-tag" data-q="LangChain 的 Chain 怎么用？"><i class="fa fa-link"></i> LangChain</span>
+        <span class="guide-tag" data-q="LangGraph 的条件边怎么配置？"><i class="fa fa-share-alt"></i> LangGraph</span>
+        <span class="guide-tag" data-q="Prompt Engineering 有哪些常见策略？"><i class="fa fa-pencil"></i> Prompt</span>
+        <span class="guide-tag" data-q="RAG 的整体流程分哪几步？"><i class="fa fa-book"></i> RAG</span>
+        <span class="guide-tag" data-q="ReAct Agent 的原理是什么？"><i class="fa fa-android"></i> AI Agent</span>
+        <span class="guide-tag" data-q="Linux 文件权限 chmod 怎么用？"><i class="fa fa-linux"></i> Linux</span>
+        <span class="guide-tag" data-q="文档分割用什么 chunk_size 比较好？"><i class="fa fa-scissors"></i> 文档处理</span>
+      </div>
+      <p class="guide-hint">点击上面的标签，或直接在下方输入你的问题</p>
+    </div>
 
     <!-- Input -->
-    <div class="px-6 py-4 border-t">
+    <div class="px-4 md:px-6 py-3 md:py-4 border-t">
       <div class="flex gap-2">
         <input id=input type=text placeholder="输入你的问题…" autofocus
-         class="flex-1 border rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-400 text-sm">
-        <button id=send class="bg-blue-600 text-white px-5 py-3 rounded-xl hover:bg-blue-700 text-sm font-medium">
+         class="flex-1 border rounded-xl px-4 py-2.5 md:py-3 focus:outline-none focus:ring-2 focus:ring-blue-400 text-sm">
+        <button id=send class="bg-blue-600 text-white px-4 md:px-5 py-2.5 md:py-3 rounded-xl hover:bg-blue-700 text-sm font-medium">
           <i class="fa fa-paper-plane"></i>
         </button>
       </div>
@@ -67,123 +159,342 @@
 </div>
 
 <script>
+// 兼容非 HTTPS 环境的 UUID 生成
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // fallback: crypto.getRandomValues 不可用时的纯随机 UUID v4
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0;
+    var v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+// 兼容禁用 localStorage 的环境（如 data: URL 或隐私模式）
+const memStore = {};
+function safeGet(key) {
+  try { return localStorage.getItem(key); }
+  catch(e) { return memStore[key] || null; }
+}
+function safeSet(key, val) {
+  try { localStorage.setItem(key, val); }
+  catch(e) { memStore[key] = val; }
+}
+try {
 const msgsEl = document.getElementById('messages');
 const input = document.getElementById('input');
 const send = document.getElementById('send');
 const newChatBtn = document.getElementById('newChat');
 const sessionListEl = document.getElementById('sessionList');
+const guideCard = document.getElementById('guideCard');
+const authOverlay = document.getElementById('authOverlay');
+const authPassword = document.getElementById('authPassword');
+const authSubmit = document.getElementById('authSubmit');
+const authError = document.getElementById('authError');
+const sidebar = document.getElementById('sidebar');
+const mobileMenuBtn = document.getElementById('mobileMenuBtn');
 
-// ---- Session management ----
-let currentSessionId = localStorage.getItem('currentSessionId') || crypto.randomUUID();
-localStorage.setItem('currentSessionId', currentSessionId);
+let authToken = safeGet('authToken') || '';
+let currentSessionId = safeGet('currentSessionId') || generateUUID();
+safeSet('currentSessionId', currentSessionId);
+let userId = safeGet('userId') || generateUUID();
+safeSet('userId', userId);
+let hasMessages = false;
 
-let userId = localStorage.getItem('userId') || crypto.randomUUID();
-localStorage.setItem('userId', userId);
-
-function apiUrl(path) {
-  return path + (path.includes('?') ? '&' : '?') + 'user_id=' + encodeURIComponent(userId);
+// ---- Auth ----
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/auth', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({password:'__check__'})
+    });
+    const data = await res.json();
+    return data.need_auth;
+  } catch(e) { return false; }
 }
 
+async function doAuth() {
+  const pw = authPassword.value.trim();
+  if (!pw) return;
+  try {
+    const res = await fetch('/api/auth', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({password:pw})
+    });
+    if (!res.ok) {
+      authError.textContent = '密码错误';
+      authError.classList.remove('hidden');
+      authPassword.value = '';
+      return;
+    }
+    const data = await res.json();
+    authToken = data.token;
+    safeSet('authToken', authToken);
+    authOverlay.classList.add('hidden');
+    loadSessions();
+  } catch(e) {
+    authError.textContent = '验证失败: ' + e.message;
+    authError.classList.remove('hidden');
+  }
+}
+
+authSubmit.onclick = doAuth;
+authPassword.onkeydown = e => { if (e.key==='Enter') doAuth(); };
+
+// ---- API helpers ----
+function apiUrl(path) {
+  // 如果页面没有 HTTP base URL（如 Preview 直接渲染），用相对路径兜底
+  const base = window.location.origin && window.location.origin !== 'null'
+    ? window.location.origin : '';
+  const fullPath = path.startsWith('http') ? path : base + path;
+  return fullPath + (fullPath.includes('?')?'&':'?') + 'user_id=' + encodeURIComponent(userId);
+}
+
+async function apiFetch(path, opts={}) {
+  const headers = {...(opts.headers||{})};
+  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+  // 确保路径在非 HTTP 环境下也能正确解析
+  let url = path;
+  if (!path.startsWith('http')) {
+    const base = (window.location.origin && window.location.origin !== 'null')
+      ? window.location.origin : '';
+    url = base + path;
+  }
+  return fetch(url, {...opts, headers});
+}
+
+// ---- Sessions ----
 async function loadSessions() {
   try {
-    const res = await fetch(apiUrl('/api/sessions'));
+    const res = await apiFetch(apiUrl('/api/sessions'));
+    if (res.status === 401) { showAuth(); return; }
     const data = await res.json();
-    renderSessionList(data.sessions || []);
-  } catch(e) {
-    console.error('加载会话列表失败:', e);
-  }
+    renderSessionList(data.sessions||[]);
+  } catch(e) { console.error('加载会话列表失败:', e); }
+}
+
+async function loadStats() {
+  try {
+    const res = await apiFetch('/api/knowledge/stats');
+    const data = await res.json();
+    document.getElementById('docCount').textContent = data.doc_count;
+    document.getElementById('chunkCount').textContent = data.chunk_count;
+  } catch(e) {}
+}
+
+function timeAgo(dt) {
+  if (!dt) return '';
+  const d = new Date(dt), now = new Date();
+  const min = Math.floor((now-d)/60000);
+  if (min<1) return '刚刚';
+  if (min<60) return min+'分钟前';
+  const h = Math.floor(min/60);
+  if (h<24) return h+'小时前';
+  return Math.floor(h/24)+'天前';
 }
 
 function renderSessionList(sessions) {
   sessionListEl.innerHTML = '';
   sessions.forEach(s => {
     const div = document.createElement('div');
-    div.className = 'sidebar-item flex items-center justify-between' + (s.id === currentSessionId ? ' active' : '');
+    div.className = 'sidebar-item' + (s.id===currentSessionId?' active':'');
     div.innerHTML = `
-      <span class="text-sm truncate flex-1" title="${escHtml(s.title)}">${escHtml(s.title)}</span>
-      <span class="delete-btn text-gray-400 hover:text-red-500 ml-1 flex-shrink-0" data-sid="${escHtml(s.id)}">
-        <i class="fa fa-trash-o text-xs"></i>
-      </span>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <span class="text-sm truncate flex-1" title="${escHtml(s.title)}" style="max-width:130px">${escHtml(s.title)}</span>
+        <span class="rename-btn text-gray-400 flex-shrink-0" data-sid="${escHtml(s.id)}" style="font-size:0.7rem;cursor:pointer" title="重命名">
+          <i class="fa fa-pencil"></i>
+        </span>
+        <span class="delete-btn text-gray-400 hover:text-red-500 flex-shrink-0" data-sid="${escHtml(s.id)}" style="margin-left:2px">
+          <i class="fa fa-trash-o text-xs"></i>
+        </span>
+      </div>
+      <div class="time">${timeAgo(s.updated_at)}</div>
     `;
-    div.querySelector('.sidebar-item span:first-child').onclick = () => switchSession(s.id);
-    div.querySelector('.delete-btn').onclick = (e) => { e.stopPropagation(); deleteSession(s.id); };
+    div.querySelector('div:first-child > span:first-child').onclick = () => switchSession(s.id);
+    div.querySelector('.delete-btn').onclick = e => { e.stopPropagation(); deleteSession(s.id); };
+    div.querySelector('.rename-btn').onclick = e => { e.stopPropagation(); startRename(s.id, s.title); };
     sessionListEl.appendChild(div);
   });
 }
 
+async function startRename(sessionId, oldTitle) {
+  // 找到对应 sidebar-item 的标题 span
+  const items = sessionListEl.querySelectorAll('.sidebar-item');
+  for (const item of items) {
+    const renameBtn = item.querySelector('.rename-btn');
+    if (renameBtn && renameBtn.dataset.sid === sessionId) {
+      const titleSpan = item.querySelector('div:first-child > span:first-child');
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'edit-title';
+      input.value = oldTitle;
+      input.maxLength = 30;
+      titleSpan.replaceWith(input);
+      input.focus();
+      input.select();
+      const finish = async () => {
+        const newTitle = input.value.trim() || '新对话';
+        try {
+          await apiFetch('/api/sessions/' + sessionId, {
+            method:'PUT',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({title: newTitle}),
+          });
+        } catch(e) {}
+        loadSessions();
+      };
+      input.onblur = finish;
+      input.onkeydown = e => { if (e.key==='Enter') finish(); if (e.key==='Escape') loadSessions(); };
+      break;
+    }
+  }
+}
+
 async function switchSession(sessionId) {
   currentSessionId = sessionId;
-  localStorage.setItem('currentSessionId', sessionId);
+  safeSet('currentSessionId', sessionId);
   msgsEl.innerHTML = '';
-
+  guideCard.style.display = 'none';
+  hasMessages = true;
   try {
-    const res = await fetch(apiUrl('/api/sessions/' + sessionId));
+    const res = await apiFetch(apiUrl('/api/sessions/'+sessionId));
+    if (res.status===401) { showAuth(); return; }
     const data = await res.json();
-    if (data.messages) {
-      data.messages.forEach(m => addMsg(m.role, m.content));
-    }
-  } catch(e) {
-    console.error('加载会话历史失败:', e);
-  }
-
+    if (data.messages) data.messages.forEach(m => addMsg(m.role, m.content, m.sources));
+  } catch(e) { console.error('加载会话历史失败:', e); }
+  if (msgsEl.children.length===0) { guideCard.style.display=''; hasMessages=false; }
   loadSessions();
+  closeMobileSidebar();
 }
 
 async function deleteSession(sessionId) {
   if (!confirm('确定删除这个对话吗？')) return;
   try {
-    await fetch(apiUrl('/api/sessions/' + sessionId), { method: 'DELETE' });
-    if (sessionId === currentSessionId) {
-      newSession();
-    } else {
-      loadSessions();
-    }
-  } catch(e) {
-    console.error('删除失败:', e);
-  }
+    await apiFetch(apiUrl('/api/sessions/'+sessionId), {method:'DELETE'});
+    if (sessionId===currentSessionId) newSession();
+    else loadSessions();
+  } catch(e) { console.error('删除失败:', e); }
 }
 
 function newSession() {
-  currentSessionId = crypto.randomUUID();
-  localStorage.setItem('currentSessionId', currentSessionId);
+  currentSessionId = generateUUID();
+  safeSet('currentSessionId', currentSessionId);
   msgsEl.innerHTML = '';
+  guideCard.style.display = '';
+  hasMessages = false;
   loadSessions();
 }
 
 newChatBtn.onclick = newSession;
 
+// ---- Guide tags ----
+document.querySelectorAll('.guide-tag').forEach(tag => {
+  tag.onclick = () => {
+    const q = tag.dataset.q;
+    input.value = q;
+    input.focus();
+    // 闪烁反馈：标签变色 + 输入框高亮
+    tag.style.background = '#dbeafe';
+    tag.style.borderColor = '#2563eb';
+    input.style.transition = 'box-shadow 0.15s';
+    input.style.boxShadow = '0 0 0 3px rgba(37,99,235,0.3)';
+    setTimeout(() => {
+      tag.style.background = '';
+      tag.style.borderColor = '';
+      input.style.boxShadow = '';
+    }, 400);
+  };
+});
+
 // ---- Chat ----
 function addMsg(role, text, sources) {
+  if (!hasMessages && role==='user') {
+    guideCard.style.display = 'none';
+    hasMessages = true;
+  }
   const div = document.createElement('div');
-  div.className = role === 'user'
+  div.className = role==='user'
     ? 'flex justify-end'
-    : 'flex gap-3';
-
+    : 'flex gap-2 md:gap-3';
   const bubble = document.createElement('div');
-  bubble.className = role === 'user'
-    ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm px-4 py-3 max-w-[75%] text-sm'
-    : 'bg-gray-100 text-gray-800 rounded-2xl rounded-tl-sm px-4 py-3 max-w-[85%] text-sm msg-bot';
-
-  if (role === 'bot') {
+  bubble.className = role==='user'
+    ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm px-3 md:px-4 py-2 md:py-3 max-w-[85%] md:max-w-[75%] text-sm'
+    : 'bg-gray-100 text-gray-800 rounded-2xl rounded-tl-sm px-3 md:px-4 py-2 md:py-3 max-w-[90%] md:max-w-[85%] text-sm msg-bot';
+  if (role==='bot') {
     bubble.innerHTML = marked.parse(text);
     const avatar = document.createElement('div');
-    avatar.className = 'w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0';
-    avatar.innerHTML = '<i class="fa fa-robot text-blue-600 text-xs"></i>';
+    avatar.className = 'w-7 h-7 md:w-8 md:h-8 flex items-center justify-center flex-shrink-0';
+    avatar.innerHTML = `<svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#6366F1"/>
+    </linearGradient>
+  </defs>
+  <circle cx="20" cy="20" r="20" fill="url(#bgGrad)"/>
+  <rect x="10" y="7" width="14" height="17" rx="2" fill="white" opacity="0.95"/>
+  <rect x="12" y="9" width="10" height="1.5" rx="0.75" fill="#93C5FD"/>
+  <rect x="12" y="12" width="8" height="1.5" rx="0.75" fill="#BFDBFE"/>
+  <rect x="12" y="15" width="6" height="1.5" rx="0.75" fill="#BFDBFE"/>
+  <circle cx="25" cy="24" r="7" fill="#10B981"/>
+  <path d="M23 24l1.5 1.5 3-2.5" stroke="white" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
     div.appendChild(avatar);
   } else {
     bubble.textContent = text;
   }
   div.appendChild(bubble);
   msgsEl.appendChild(div);
-
-  if (sources && sources.length) {
-    const src = document.createElement('div');
-    src.className = 'text-xs text-gray-400 mt-1 ml-10';
-    src.textContent = '来源: ' + sources.map(s => s.source).join(', ');
-    msgsEl.appendChild(src);
-  }
-
+  addSourcesRow(sources);
   msgsEl.scrollTop = msgsEl.scrollHeight;
+}
+
+function addSourcesRow(sources) {
+  if (!sources) return;
+  if (typeof sources === 'string') {
+    try { sources = JSON.parse(sources); } catch (e) { return; }
+  }
+  if (!sources.length) return;
+  const src = document.createElement('div');
+  src.className = 'text-xs text-gray-400 mt-1 ml-8 md:ml-10';
+  src.textContent = '来源: ' + sources.map(s=>s.source).join(', ');
+  msgsEl.appendChild(src);
+}
+
+let stepList = [];
+
+function createStepIndicator() {
+  const el = document.createElement('div');
+  el.className = 'step-indicator ml-8 md:ml-10';
+  el.innerHTML = `
+    <div class="step-track">
+      <div class="step-progress" id="stepProgress"></div>
+    </div>
+    <div class="step-text" id="stepText">准备中...</div>
+  `;
+  return el;
+}
+
+function updateStepIndicator(el, step, status, detail, actualSteps) {
+  const textEl = el.querySelector('#stepText');
+  const progressEl = el.querySelector('#stepProgress');
+
+  if (actualSteps) stepList = actualSteps;
+  const idx = stepList.indexOf(step);
+  const total = stepList.length || 1;
+
+  if (status === 'done') {
+    progressEl.style.width = ((idx + 1) / total * 100) + '%';
+    const detailHtml = detail ? ' <span style="color:#6b7280;font-size:11px">(' + detail + ')</span>' : '';
+    textEl.innerHTML = '✅ ' + step + detailHtml;
+    textEl.style.color = '#10B981';
+  } else if (status === 'skip') {
+    progressEl.style.width = ((idx + 1) / total * 100) + '%';
+    textEl.innerHTML = '⚠️ ' + step + ' <span style="color:#9ca3af;font-size:11px">(' + detail + ')</span>';
+    textEl.style.color = '#f59e0b';
+  }
 }
 
 async function doSend() {
@@ -192,23 +503,63 @@ async function doSend() {
   addMsg('user', text);
   input.value = '';
 
-  const thinking = document.createElement('div');
-  thinking.className = 'text-gray-400 text-sm ml-10';
-  thinking.textContent = '思考中...';
-  msgsEl.appendChild(thinking);
+  const stepEl = createStepIndicator();
+  msgsEl.appendChild(stepEl);
+  msgsEl.scrollTop = msgsEl.scrollHeight;
 
   try {
-    const res = await fetch('/api/chat', {
+    const res = await apiFetch('/api/chat/stream', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({message: text, session_id: currentSessionId, user_id: userId}),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, session_id: currentSessionId, user_id: userId }),
     });
-    const data = await res.json();
-    thinking.remove();
-    addMsg('bot', data.reply, data.sources);
-    loadSessions();  // 刷新侧边栏（更新标题/排序）
-  } catch(e) {
-    thinking.remove();
+    if (res.status === 401) { stepEl.remove(); showAuth(); return; }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let answer = '';
+    let sources = [];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop();
+
+      for (const part of parts) {
+        const lines = part.split('\n');
+        let eventType = '';
+        let data = '';
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) eventType = line.slice(7);
+          else if (line.startsWith('data: ')) data = line.slice(6);
+        }
+
+        if (!data) continue;
+
+        try {
+          const parsed = JSON.parse(data);
+          if (eventType === 'init') {
+            stepList = parsed.steps || [];
+          } else if (eventType === 'step') {
+            updateStepIndicator(stepEl, parsed.step, parsed.status, parsed.detail, parsed.actualSteps);
+          } else if (eventType === 'answer') {
+            answer = parsed.answer;
+            sources = parsed.sources || [];
+          }
+        } catch (e) {}
+      }
+    }
+
+    stepEl.remove();
+    addMsg('bot', answer, sources);
+    loadSessions();
+  } catch (e) {
+    stepEl.remove();
     addMsg('bot', '请求失败: ' + e.message);
   }
 }
@@ -222,8 +573,30 @@ function escHtml(s) {
 send.onclick = doSend;
 input.onkeydown = e => { if (e.key==='Enter') doSend(); };
 
-// 初始化
-loadSessions();
+// ---- Auth flow ----
+function showAuth() {
+  authOverlay.classList.remove('hidden');
+  authPassword.focus();
+}
+
+// ---- Mobile sidebar ----
+function closeMobileSidebar() { sidebar.classList.remove('open'); }
+mobileMenuBtn.onclick = () => sidebar.classList.toggle('open');
+
+// ---- Init ----
+(async () => {
+  const needAuth = await checkAuth();
+  if (needAuth && !authToken) {
+    showAuth();
+  } else {
+    loadSessions();
+  }
+  loadStats();
+})();
+} catch(e) {
+  document.body.innerHTML += '<div style="position:fixed;top:10px;left:10px;background:red;color:#fff;padding:10px;z-index:9999">JS错误: '+e.message+'</div>';
+  console.error(e);
+}
 </script>
 </body>
 </html>
