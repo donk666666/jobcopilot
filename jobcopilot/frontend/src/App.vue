@@ -14,7 +14,7 @@ const navItems = [
   { path: '/jd', label: 'JD分析', icon: 'Document' },
   { path: '/resume', label: '简历优化', icon: 'Edit' },
   { path: '/cover-letter', label: '求职信', icon: 'Message' },
-  { path: '/tracker', label: '投递管理', icon: 'List' },
+  { path: '/greet', label: '打招呼', icon: 'ChatDotRound' },
 ]
 
 async function checkHealth() {

@@ -31,8 +31,23 @@ def _get_embeddings():
 
     try:
         from langchain_community.embeddings import HuggingFaceEmbeddings
+        # 优先使用本地模型路径，避免联网校验失败导致 RAG 降级
+        # jobcopilot/models 或 上级目录/models
+        _jc = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # jobcopilot/
+        local_model = ""
+        for cand in (
+            os.path.join(_jc, "models", "bge-small-zh-v1.5"),
+            os.path.join(os.path.dirname(_jc), "models", "bge-small-zh-v1.5"),
+        ):
+            if os.path.isdir(cand):
+                local_model = cand
+                break
+        if local_model:
+            model_name = local_model
+        else:
+            model_name = "BAAI/bge-small-zh-v1.5"
         _embeddings = HuggingFaceEmbeddings(
-            model_name="BAAI/bge-small-zh-v1.5",
+            model_name=model_name,
             model_kwargs={"device": "cpu"},
             encode_kwargs={"normalize_embeddings": True}
         )

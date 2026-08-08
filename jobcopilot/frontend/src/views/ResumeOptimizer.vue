@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { matchResume, tailorResume, getJDAnalyses, getResumeOptimizations, getActiveResume, saveActiveResume, uploadResume, submitFullPipeline, getTaskStatus } from '@/api'
+import { matchResume, tailorResume, getJDAnalyses, getResumeOptimizations, getActiveResume, saveActiveResume, uploadResume, submitFullPipeline, getTaskStatus, getResumeHistory, updateResumeHistory, deleteResumeHistory } from '@/api'
 import RadarChart from '@/components/RadarChart.vue'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 
@@ -21,6 +21,12 @@ const optHistory = ref<any[]>([])
 const showAnnotations = ref(true)
 
 const lastMatchedForTailor = ref('')
+
+// 历史简历
+const resumeHistory = ref<any[]>([])
+const resumeHistoryLoading = ref(false)
+const editingResumeId = ref<number | null>(null)
+const editingName = ref('')
 
 // 文件上传
 const uploadLoading = ref(false)
@@ -209,11 +215,56 @@ watch(showAnnotations, async (val) => {
   finally { loading.value = false }
 })
 
+async function loadResumeHistory() {
+  resumeHistoryLoading.value = true
+  try {
+    const res: any = await getResumeHistory()
+    resumeHistory.value = res || []
+  } catch { /* ignore */ }
+  finally { resumeHistoryLoading.value = false }
+}
+
+function selectResumeHistory(item: any) {
+  resumeText.value = item.content
+  editingResumeId.value = item.id
+  editingName.value = item.name
+}
+
+function startEditName() {
+  editingResumeId.value = resumeHistory.value.find(r => r.is_active)?.id ?? null
+}
+
+async function saveEditedResume() {
+  if (editingResumeId.value === null) return
+  try {
+    await updateResumeHistory(editingResumeId.value, resumeText.value, editingName.value)
+    await saveActiveResume(resumeText.value)
+    editingResumeId.value = null
+    await loadResumeHistory()
+  } catch (e: any) { error.value = e.message || '保存失败' }
+}
+
+async function deleteResumeHistoryItem(id: number) {
+  try {
+    await deleteResumeHistory(id)
+    await loadResumeHistory()
+  } catch (e: any) { error.value = e.message || '删除失败' }
+}
+
+function newResumeText() {
+  resumeText.value = ''
+  editingResumeId.value = null
+  editingName.value = '默认简历'
+}
+
 onMounted(async () => {
   await loadHistory()
+  await loadResumeHistory()
   try {
     const res: any = await getActiveResume()
     if (res?.content) resumeText.value = res.content
+    if (res?.name) editingName.value = res.name
+    if (res?.id) editingResumeId.value = res.id
   } catch { /* ignore */ }
 })
 
@@ -256,14 +307,39 @@ function getScoreColor(score: number) {
   return 'var(--color-danger)'
 }
 
+// 各维度满分权重（与后端 prompt 定义一致，用于归一化雷达图）
+const DIMENSION_WEIGHTS: Record<string, number> = {
+  '技能匹配': 40,
+  '经验匹配': 25,
+  '学历匹配': 10,
+  '综合素质': 15,
+  '加分项': 10,
+}
+
 const radarData = computed(() => {
   if (!matchResult.value?.score_breakdown) return {}
+  const breakdown = matchResult.value.score_breakdown
   return Object.fromEntries(
-    Object.entries(matchResult.value.score_breakdown).map(([k, v]) => [k, Number(v)])
+    Object.entries(breakdown).map(([k, v]) => {
+      const num = Number(v)
+      const weight = DIMENSION_WEIGHTS[k] || 100
+      // 归一化为 0-100 百分比，让各维度按各自满分计算实际占比
+      return [k, Math.min(100, Math.round((num / weight) * 100))]
+    })
   )
 })
 
 const radarReady = computed(() => Object.keys(radarData.value).length >= 3)
+
+// 归一化后的明细进度条（各维度按各自满分换算成百分比）
+const breakdownData = computed(() => {
+  if (!matchResult.value?.score_breakdown) return []
+  return Object.entries(matchResult.value.score_breakdown).map(([k, v]) => {
+    const num = Number(v)
+    const weight = DIMENSION_WEIGHTS[k] || 100
+    return { label: k, percent: Math.min(100, Math.round((num / weight) * 100)), raw: num, weight }
+  })
+})
 </script>
 
 <template>
@@ -303,6 +379,39 @@ const radarReady = computed(() => Object.keys(radarData.value).length >= 3)
             <i class="fa fa-check-circle" style="color: var(--color-success)" /> {{ uploadedFile.name }} ({{ uploadedFile.char_count }} 字)
           </div>
           <el-input v-model="resumeText" type="textarea" :rows="8" placeholder="粘贴你的简历全文，或上传文件自动填充..." />
+          <div class="resume-actions">
+            <el-button size="small" type="primary" plain @click="saveEditedResume" :disabled="editingResumeId === null">
+              保存修改
+            </el-button>
+            <el-button size="small" text @click="newResumeText">新建简历</el-button>
+          </div>
+          <el-input v-model="editingName" size="small" placeholder="简历名称" style="margin-top: 6px" />
+        </div>
+
+        <!-- 历史简历列表 -->
+        <div class="input-card">
+          <div class="card-header-row">
+            <h4 class="card-header">历史简历</h4>
+            <el-button size="small" text @click="loadResumeHistory" :loading="resumeHistoryLoading">刷新</el-button>
+          </div>
+          <div v-if="resumeHistory.length === 0" class="empty-hint">暂无历史简历，上传或保存后这里会记录。</div>
+          <div v-else class="resume-history-list">
+            <div
+              v-for="item in resumeHistory"
+              :key="item.id"
+              class="resume-history-item"
+              :class="{ active: item.is_active }"
+              @click="selectResumeHistory(item)"
+            >
+              <div class="rh-item-top">
+                <span class="rh-name" :title="item.name">{{ item.name }}</span>
+                <span v-if="item.is_active" class="rh-active-tag">当前</span>
+                <span class="rh-del" @click.stop="deleteResumeHistoryItem(item.id)" title="删除">✕</span>
+              </div>
+              <div class="rh-preview">{{ item.content?.slice(0, 40) }}</div>
+              <div class="rh-time">{{ item.updated_at?.slice(0, 16) }}</div>
+            </div>
+          </div>
         </div>
 
         <div class="input-card">
@@ -322,12 +431,14 @@ const radarReady = computed(() => Object.keys(radarData.value).length >= 3)
               <div class="jd-item-preview">{{ item.jd_preview }}</div>
             </div>
           </div>
-          <el-button type="primary" :loading="loading" @click="handleMatch" style="width: 100%; margin-top: 12px" :disabled="!selectedJdId">
-            开始匹配分析
-          </el-button>
-          <el-button type="success" :loading="pipelineRunning" @click="handleFullPipeline" style="width: 100%; margin-top: 8px" :disabled="!selectedJdId || !resumeText.trim()">
-            一键全流程 (JD分析→匹配→优化→求职信)
-          </el-button>
+          <div class="action-row">
+            <el-button type="primary" :loading="loading" @click="handleMatch" :disabled="!selectedJdId" class="action-btn">
+              {{ loading && !matchResult ? '分析中...' : '开始匹配分析' }}
+            </el-button>
+            <el-button type="success" :loading="pipelineRunning" @click="handleFullPipeline" :disabled="!selectedJdId || !resumeText.trim()" class="action-btn">
+              一键全流程
+            </el-button>
+          </div>
 
           <!-- Pipeline 进度 -->
           <div v-if="pipelineRunning || pipelineError" class="pipeline-progress-card">
@@ -383,15 +494,15 @@ const radarReady = computed(() => Object.keys(radarData.value).length >= 3)
           </el-row>
 
           <!-- Score breakdown -->
-          <div v-if="matchResult?.score_breakdown" class="breakdown-list">
-            <div v-for="(score, label) in matchResult.score_breakdown" :key="label" class="breakdown-row">
-              <span class="breakdown-label">{{ label }}</span>
+          <div v-if="breakdownData.length" class="breakdown-list">
+            <div v-for="bd in breakdownData" :key="bd.label" class="breakdown-row">
+              <span class="breakdown-label">{{ bd.label }}</span>
               <el-progress
-                :percentage="score"
-                :color="getScoreColor(score)"
+                :percentage="bd.percent"
+                :color="getScoreColor(bd.percent)"
                 style="flex: 1; margin: 0 12px"
               />
-              <span class="breakdown-val">{{ score }}</span>
+              <span class="breakdown-val">{{ bd.raw }}/{{ bd.weight }}</span>
             </div>
           </div>
 
@@ -418,7 +529,7 @@ const radarReady = computed(() => Object.keys(radarData.value).length >= 3)
           </div>
 
           <el-button type="primary" :loading="loading" @click="handleTailor" style="width: 100%; margin-top: 20px">
-            {{ tailoredResult ? '重新生成优化简历' : '根据匹配结果优化简历' }}
+            {{ loading && tailoredResult ? '正在生成优化简历（约20秒）...' : (tailoredResult ? '重新生成优化简历' : '根据匹配结果优化简历') }}
           </el-button>
         </div>
 
@@ -448,17 +559,42 @@ const radarReady = computed(() => Object.keys(radarData.value).length >= 3)
 .card-header { margin: 0 0 12px; font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .card-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 
+.action-row { display: flex; gap: 8px; margin-top: 12px; }
+.action-row .el-button.action-btn { flex: 1; margin: 0; }
+
 .empty-hint { color: var(--text-muted); padding: 12px 0; font-size: 13px; }
+
+.resume-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+.resume-history-list { max-height: 240px; overflow-y: auto; }
+.resume-history-item {
+  padding: 8px 10px; margin-bottom: 6px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--border-input); transition: all var(--t-fast) ease-out;
+}
+.resume-history-item:hover { border-color: var(--accent); }
+.resume-history-item.active { border-color: var(--accent); background: var(--accent-subtle); }
+.rh-item-top { display: flex; align-items: center; gap: 6px; }
+.rh-name { font-weight: 600; font-size: 13px; color: var(--text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rh-active-tag { font-size: 11px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; flex-shrink: 0; }
+.rh-del { color: var(--text-muted); cursor: pointer; flex-shrink: 0; }
+.rh-del:hover { color: var(--color-danger); }
+.rh-preview { font-size: 12px; color: var(--text-muted); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rh-time { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
 .jd-list { max-height: 260px; overflow-y: auto; }
 .jd-item {
   padding: 8px 10px; margin-bottom: 6px; border-radius: 6px; cursor: pointer;
   border: 1px solid var(--border-input); transition: all var(--t-fast) ease-out;
+  overflow: hidden;
 }
 .jd-item:hover { border-color: var(--accent); }
 .jd-item.selected { border-color: var(--accent); background: var(--accent-subtle); }
 .jd-item-title { font-weight: 600; font-size: 14px; color: var(--text-primary); }
-.jd-item-preview { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.jd-item-preview {
+  font-size: 12px; color: var(--text-muted); margin-top: 2px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 
 .history-card {
   background: var(--bg-card); border: 1px solid var(--border-subtle);
