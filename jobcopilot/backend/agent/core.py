@@ -11,12 +11,57 @@ import json
 import re
 from typing import Optional, AsyncIterator, Dict, Any
 from langchain_openai import ChatOpenAI
-from langchain.agents import AgentExecutor, create_react_agent
+from langgraph.prebuilt import create_react_agent
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.prompts import PromptTemplate
-from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 
 from agent.tools import get_all_tools
 from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
+
+
+def _extract_json(text: str):
+    """健壮地从 LLM 输出中提取 JSON：支持代码块/纯JSON/带杂文"""
+    if not text:
+        return None
+    # 1) 代码块内 JSON
+    m = re.search(r'```(?:json)?\s*(.*?)\s*```', text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except json.JSONDecodeError:
+            pass
+    # 2) 从第一个 { 开始做括号配对，提取最外层完整 JSON
+    start = text.find("{")
+    if start != -1:
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+            else:
+                if ch == '"':
+                    in_str = True
+                elif ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(text[start:i + 1])
+                        except json.JSONDecodeError:
+                            break
+    # 3) 整体解析
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
 
 
 # ReAct 提示词模板
@@ -86,21 +131,11 @@ class JobCopilotAgent:
         # 初始化工具
         self.tools = get_all_tools()
 
-        # 创建ReAct Agent
+        # 创建 ReAct Agent（langgraph 版，工具自动注入）
         self.agent = create_react_agent(
-            llm=self.llm,
+            model=self.llm,
             tools=self.tools,
-            prompt=REACT_PROMPT,
-        )
-
-        # 创建Agent执行器
-        self.executor = AgentExecutor(
-            agent=self.agent,
-            tools=self.tools,
-            verbose=verbose,
-            handle_parsing_errors=True,
-            max_iterations=8,
-            return_intermediate_steps=False,
+            state_modifier=REACT_PROMPT.template,
         )
 
     async def run(self, question: str) -> Dict[str, Any]:
@@ -115,9 +150,11 @@ class JobCopilotAgent:
         }
         """
         try:
-            result = await self.executor.ainvoke({"input": question})
+            result = await self.agent.ainvoke({"messages": [HumanMessage(content=question)]})
+            msgs = result.get("messages", [])
+            output = msgs[-1].content if msgs else ""
             return {
-                "output": result.get("output", ""),
+                "output": output,
                 "success": True
             }
         except Exception as e:
@@ -129,8 +166,12 @@ class JobCopilotAgent:
 
     async def run_stream(self, question: str) -> AsyncIterator[str]:
         """流式运行Agent，实时返回结果"""
-        async for chunk in self.executor.astream({"input": question}):
-            yield chunk
+        async for event in self.agent.astream({"messages": [HumanMessage(content=question)]}):
+            if "messages" in event:
+                msg = event["messages"][-1]
+                content = getattr(msg, "content", "")
+                if content and not isinstance(msg, (HumanMessage, SystemMessage)):
+                    yield content
 
 
 # ============================================================
@@ -210,13 +251,18 @@ async def match_resume_direct(
     response = await llm.ainvoke(messages)
     content = response.content
 
-    try:
-        json_match = re.search(r'```json\s*(.*?)\s*```', content, re.DOTALL)
-        if json_match:
-            content = json_match.group(1)
-        return {"result": json.loads(content), "rag_context": rag_context, "success": True}
-    except json.JSONDecodeError:
-        return {"result": None, "raw": response.content, "success": False, "error": "JSON解析失败"}
+    parsed = _extract_json(content)
+    if parsed is None:
+        # 解析失败重试一次（降 temperature 提高稳定性）
+        llm.temperature = 0.2
+        try:
+            response = await llm.ainvoke(messages)
+            parsed = _extract_json(response.content)
+        except Exception:
+            parsed = None
+    if parsed is not None:
+        return {"result": parsed, "rag_context": rag_context, "success": True}
+    return {"result": None, "raw": response.content, "success": False, "error": "JSON解析失败"}
 
 
 async def tailor_resume_direct(
@@ -301,3 +347,71 @@ async def generate_cover_letter_direct(
 
     response = await llm.ainvoke(messages)
     return {"result": response.content, "style": style_name, "success": True}
+
+
+async def generate_greeting_direct(
+    resume_text: str, jd_text: str, company_name: str,
+    position_title: str, candidate_name: str, style: str,
+    variant_count: int, api_key: str, base_url: str
+) -> Dict[str, Any]:
+    """生成个性化打招呼文案（多变体），用于 Boss直聘/脉脉等私信场景"""
+    from langchain_openai import ChatOpenAI
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    llm = ChatOpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        model=DEEPSEEK_MODEL,
+        temperature=0.8,
+    )
+
+    style_guide = {
+        "casual": "亲和自然：语气真诚自然，有亲和力，像真人打招呼，适合互联网/创业公司",
+        "professional": "专业得体：措辞正式但不生硬，突出专业能力和诚意，适合中大型企业",
+        "tech": "技术直击：开门见山展示技术栈和项目亮点，简洁有数据，适合技术岗",
+    }.get(style, "亲和自然")
+
+    system = """你是一位资深招聘沟通顾问，擅长帮求职者写出一眼打动 HR 的打招呼私信（Boss直聘/脉脉/领英场景）。
+打招呼文案要求：
+1. 简短有力，80-150字，第一句就要抓住注意力，不要寒暄客套
+2. 结合目标JD的关键要求和候选人简历的真实经历，体现针对性，拒绝模板化
+3. 突出1-2个与职位最匹配的核心卖点（技能/项目/数据）
+4. 结尾自然表达沟通意愿
+5. 不要用"尊敬的""您好，我是"等过于正式的求职信开场，要像真实的私信对话"""
+
+    prompt = f"""请根据以下信息，生成 {variant_count} 条不同风格的个性化打招呼文案（用中文）：
+
+## 目标公司
+{company_name or '未知公司'}
+
+## 目标职位
+{position_title or '未知职位'}
+
+## 职位描述（JD）
+{jd_text or '无'}
+
+## 候选人简历
+{resume_text}
+
+## 候选人称呼
+{candidate_name}
+
+## 语气风格
+{style_guide}
+
+## 输出要求
+直接输出 {variant_count} 条打招呼文案，每条一行，不要编号，不要额外说明，不要输出 JSON。"""
+
+    messages = [
+        SystemMessage(content=system),
+        HumanMessage(content=prompt)
+    ]
+
+    try:
+        response = await llm.ainvoke(messages)
+        content = response.content.strip()
+        variants = [v.strip() for v in content.split("\n") if v.strip()]
+        return {"variants": variants, "style": style, "success": True}
+    except Exception as e:
+        return {"variants": [], "success": False, "error": str(e)}
+
