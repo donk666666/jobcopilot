@@ -24,9 +24,9 @@ const router = createRouter({
       component: () => import('@/views/CoverLetter.vue'),
     },
     {
-      path: '/tracker',
-      name: 'Tracker',
-      component: () => import('@/views/Tracker.vue'),
+      path: '/greet',
+      name: 'Greeting',
+      component: () => import('@/views/Greeting.vue'),
     },
   ],
 })

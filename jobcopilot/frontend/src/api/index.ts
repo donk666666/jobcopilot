@@ -154,6 +154,19 @@ export function saveActiveResume(resumeText: string) {
   return api.post('/resume/active', { resume_text: resumeText })
 }
 
+// 历史简历
+export function getResumeHistory() {
+  return api.get('/resume/versions')
+}
+
+export function updateResumeHistory(id: number, resumeText: string, name?: string) {
+  return api.put(`/resume/${id}`, { resume_text: resumeText, name })
+}
+
+export function deleteResumeHistory(id: number) {
+  return api.delete(`/resume/${id}`)
+}
+
 // 健康检查
 export function healthCheck() {
   return api.get('/health')
@@ -188,4 +201,17 @@ export function getTaskStatus(taskId: string) {
 // Redis 状态
 export function getRedisStatus() {
   return api.get('/resume/redis-status')
+}
+
+// 个性化打招呼
+export function generateGreeting(data: {
+  resume_text: string
+  jd_text?: string
+  company_name?: string
+  position_title?: string
+  candidate_name?: string
+  style?: string
+  variant_count?: number
+}) {
+  return api.post('/greet/generate', data)
 }

@@ -24,14 +24,14 @@ router = APIRouter(prefix="/api/resume", tags=["简历优化"])
 class ResumeMatchRequest(BaseModel):
     resume_text: str
     jd_analysis: str
-    jd_analysis_id: int = None
+    jd_analysis_id: int | None = None
 
 
 class ResumeTailorRequest(BaseModel):
     resume_text: str
     jd_analysis: str
     match_result: str
-    opt_id: int = None
+    opt_id: int | None = None
     show_annotations: bool = True
 
 
@@ -167,7 +167,7 @@ async def tailor_resume(request: ResumeTailorRequest, db: Session = Depends(get_
 class FullPipelineRequest(BaseModel):
     resume_text: str
     jd_text: str
-    jd_analysis_id: int = None
+    jd_analysis_id: int | None = None
     style: str = "professional"
     candidate_name: str = ""
 
@@ -276,6 +276,47 @@ def get_active_resume(db: Session = Depends(get_db)):
     if not r:
         return {"content": "", "name": ""}
     return {"id": r.id, "content": r.content, "name": r.name}
+
+
+@router.get("/versions")
+def list_resumes(db: Session = Depends(get_db)):
+    """获取所有历史简历（按更新时间倒序）"""
+    records = db.query(Resume).order_by(Resume.updated_at.desc()).all()
+    return [
+        {
+            "id": r.id,
+            "name": r.name,
+            "content": r.content,
+            "is_active": r.is_active,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else "",
+        }
+        for r in records
+    ]
+
+
+@router.put("/{resume_id}")
+def update_resume(resume_id: int, request: ResumeSaveRequest, db: Session = Depends(get_db)):
+    """修改历史简历文本（按 id 更新内容/名称）"""
+    r = db.query(Resume).filter(Resume.id == resume_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="简历不存在")
+    r.content = request.resume_text
+    if request.name:
+        r.name = request.name
+    db.commit()
+    db.refresh(r)
+    return {"id": r.id, "message": "已更新"}
+
+
+@router.delete("/{resume_id}")
+def delete_resume(resume_id: int, db: Session = Depends(get_db)):
+    """删除历史简历"""
+    r = db.query(Resume).filter(Resume.id == resume_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="简历不存在")
+    db.delete(r)
+    db.commit()
+    return {"id": resume_id, "message": "已删除"}
 
 
 @router.post("/active")

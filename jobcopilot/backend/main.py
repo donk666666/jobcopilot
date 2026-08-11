@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import CORS_ORIGINS
 from database import init_db
-from api import jd, resume, cover_letter, tracker, upload, tasks as task_api
+from api import jd, resume, cover_letter, tracker, upload, tasks as task_api, greet
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -33,6 +33,7 @@ app.include_router(cover_letter.router)
 app.include_router(tracker.router)
 app.include_router(upload.router)
 app.include_router(task_api.router)
+app.include_router(greet.router)
 
 
 @app.on_event("startup")
