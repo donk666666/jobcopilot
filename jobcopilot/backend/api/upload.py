@@ -62,24 +62,44 @@ async def upload_resume(file: UploadFile = File(...)):
 
 
 def _parse_docx(content: bytes) -> str:
-    """解析 .docx 文件，提取段落和表格文本"""
+    """解析 .docx 文件，提取段落和表格文本（去重）
+
+    段落和表格在 Word 中是平级的两个 block，docx 结构里经常出现：
+      · 段落「▌ 个人信息 ─────」（标题占位）
+      · 表格 cell 里写姓名/电话/邮箱等实际信息
+    这里把段落按行提取，再把表格 cell 按行提取，整体去重，
+    保证同一行文本（如「▌ 个人信息 ─────」这种装饰行）只出现一次。
+    装饰行（只有 ─/=/_ 等 ≤3 字符无字母数字的字符）会被跳过。
+    """
     from io import BytesIO
     from docx import Document
 
     doc = Document(BytesIO(content))
-    parts = []
+    parts: list[str] = []
+    seen_lines: set[str] = set()
 
+    def _add(text: str) -> None:
+        s = (text or "").strip()
+        if not s:
+            return
+        # 跳过装饰行（───、===、___ 等 ≤3 字符且不含字母数字）
+        if len(s) <= 3 and not any(c.isalnum() for c in s):
+            return
+        if s in seen_lines:
+            return
+        seen_lines.add(s)
+        parts.append(s)
+
+    # 段落
     for para in doc.paragraphs:
-        if para.text.strip():
-            parts.append(para.text.strip())
+        _add(para.text)
 
+    # 表格 — cell.text 会把 cell 内多段落用 \n 拼起来，按行拆开加入
     for table in doc.tables:
         for row in table.rows:
-            row_text = " | ".join(
-                cell.text.strip() for cell in row.cells if cell.text.strip()
-            )
-            if row_text.strip():
-                parts.append(row_text)
+            for cell in row.cells:
+                for line in (cell.text or "").split("\n"):
+                    _add(line)
 
     return "\n".join(parts)
 

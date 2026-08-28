@@ -100,6 +100,24 @@ class ResumeOptimization(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
+# ----- 求职信历史 -----
+
+class CoverLetterHistory(Base):
+    __tablename__ = "cover_letter_history"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(String(100), nullable=False, default="anonymous", comment="用户ID（前端 localStorage UUID）")
+    candidate_name = Column(String(100), nullable=True, comment="候选人姓名")
+    recipient = Column(String(100), nullable=True, comment="收信人")
+    style = Column(String(50), nullable=True, comment="风格: formal/casual/tech")
+    company_name = Column(String(200), nullable=True, comment="目标公司")
+    position_title = Column(String(200), nullable=True, comment="目标职位")
+    jd_text = Column(Text, nullable=True, comment="原始JD")
+    resume_text = Column(Text, nullable=True, comment="原始简历")
+    content = Column(Text, nullable=False, comment="求职信内容")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 def init_db():
     """初始化数据库表"""
     Base.metadata.create_all(bind=engine)

@@ -1,17 +1,29 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { generateCoverLetter } from '@/api'
-import { ElMessage } from 'element-plus'
+import { ref, onMounted } from 'vue'
+import { generateCoverLetter, getCoverLetterHistory, deleteCoverLetter } from '@/api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+
+// 从 localStorage 取用户ID（与简历优化页一致）
+function getUserId() {
+  try { return localStorage.getItem('userId') || 'anonymous' } catch { return 'anonymous' }
+}
 
 const jdText = ref('')
 const resumeText = ref('')
 const candidateName = ref('')
+const companyName = ref('')
+const positionTitle = ref('')
 const style = ref('formal')
 const recipient = ref('招聘负责人')
 const loading = ref(false)
 const result = ref('')
 const error = ref('')
 const step = ref(1)
+
+// 求职信历史
+const history = ref<any[]>([])
+const historyLoading = ref(false)
+const userId = getUserId()
 
 const styleOptions = [
   {
@@ -56,13 +68,52 @@ async function handleGenerate() {
       jd_text: jdText.value, resume_text: resumeText.value,
       candidate_name: candidateName.value || '求职者',
       style: style.value, recipient: recipient.value,
+      user_id: userId,
+      company_name: companyName.value || undefined,
+      position_title: positionTitle.value || undefined,
     })
     result.value = res.result; step.value = 4
+    ElMessage.success(`求职信已生成并保存到历史（#${res.id}）`)
+    loadHistory()  // 刷新历史列表
   } catch (e: any) {
     error.value = e.message || '生成失败'; step.value = 4
   }
   finally { loading.value = false }
 }
+
+async function loadHistory() {
+  historyLoading.value = true
+  try {
+    const res: any = await getCoverLetterHistory(userId)
+    history.value = res || []
+  } catch (e) {
+    console.error('加载历史失败:', e)
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+async function loadFromHistory(item: any) {
+  // 加载到编辑器（可重新生成或编辑）
+  candidateName.value = item.candidate_name || ''
+  recipient.value = item.recipient || '招聘负责人'
+  style.value = item.style || 'formal'
+  result.value = item.content
+  step.value = 4
+  ElMessage.success(`已加载历史记录 #${item.id}`)
+}
+
+async function removeHistory(item: any, e?: Event) {
+  e?.stopPropagation()
+  try {
+    await ElMessageBox.confirm(`确定删除 #${item.id} 这份求职信历史？`, '确认删除', { type: 'warning' })
+    await deleteCoverLetter(item.id)
+    ElMessage.success('已删除')
+    loadHistory()
+  } catch {}
+}
+
+onMounted(() => { loadHistory() })
 
 function copyResult() {
   navigator.clipboard.writeText(result.value)
@@ -78,8 +129,10 @@ function reset() { step.value = 1; result.value = ''; error.value = ''; }
     <h2 class="page-title">求职信生成</h2>
     <p class="page-sub">Chain-of-Thought 链式 Prompt：公司需求分析 → 经历匹配 → 求职信生成 · 支持 3 种风格</p>
 
-    <!-- Steps -->
-    <div class="steps-bar">
+    <el-row :gutter="20">
+      <el-col :span="16">
+        <!-- Steps -->
+        <div class="steps-bar">
       <div class="step-item">
         <div class="step-dot" :class="{ active: step >= 1, done: step > 1 }">1</div>
         <span class="step-label" :class="{ active: step === 1 }">填写信息</span>
@@ -173,8 +226,44 @@ function reset() { step.value = 1; result.value = ''; error.value = ''; }
       </div>
       <el-alert v-if="error" :title="error" type="error" show-icon closable @close="error = ''" style="margin-top: 16px" />
     </div>
+    </el-col>
 
-    <el-alert v-if="error && step !== 4" :title="error" type="error" show-icon closable @close="error = ''" style="margin-top: 16px" />
+      <el-col :span="8">
+          <div class="history-sidebar">
+            <div class="history-header">
+              <h4>求职信历史 <el-tag size="small" type="info">{{ history.length }}</el-tag></h4>
+              <el-button size="small" text @click="loadHistory" :loading="historyLoading">刷新</el-button>
+            </div>
+            <div v-if="historyLoading && history.length === 0" class="history-empty">加载中...</div>
+            <div v-else-if="history.length === 0" class="history-empty">暂无历史，每次生成的求职信都会自动保存到这里</div>
+            <div v-else class="history-list">
+              <div
+                v-for="item in history"
+                :key="item.id"
+                class="history-item"
+                @click="loadFromHistory(item)"
+              >
+                <div class="hi-top">
+                  <span class="hi-id">#{{ item.id }}</span>
+                  <span class="hi-style" :class="item.style">{{ item.style }}</span>
+                  <span class="hi-del" @click="removeHistory(item, $event)" title="删除">×</span>
+                </div>
+                <div class="hi-title">
+                  <span v-if="item.company_name || item.position_title">
+                    {{ item.company_name }}{{ item.company_name && item.position_title ? ' · ' : '' }}{{ item.position_title }}
+                  </span>
+                  <span v-else style="color: var(--text-muted)">无公司/职位</span>
+                </div>
+                <div class="hi-meta">
+                  <span>{{ item.candidate_name }}</span>
+                  <span>{{ item.created_at?.slice(0, 16) }}</span>
+                </div>
+                <div class="hi-preview">{{ item.content?.slice(0, 60) }}...</div>
+              </div>
+            </div>
+          </div>
+        </el-col>
+      </el-row>
   </div>
 </template>
 
@@ -256,6 +345,26 @@ function reset() { step.value = 1; result.value = ''; error.value = ''; }
   background: linear-gradient(135deg, var(--accent), #1d4ed8) !important;
   border: none !important; color: #ffffff !important; font-weight: 600;
 }
+
+/* 求职信历史侧栏 */
+.history-sidebar { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-card); padding: 16px; max-height: 700px; overflow-y: auto; position: sticky; top: 16px; }
+.history-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.history-header h4 { margin: 0; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.history-empty { text-align: center; color: var(--text-muted); padding: 24px 0; font-size: 13px; }
+.history-list { display: flex; flex-direction: column; gap: 8px; }
+.history-item { background: var(--bg-deepest); border: 1px solid var(--border-input); border-radius: 8px; padding: 10px 12px; cursor: pointer; transition: all var(--t-fast) ease-out; }
+.history-item:hover { border-color: var(--accent); background: var(--accent-subtle); }
+.hi-top { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
+.hi-id { font-weight: 600; color: var(--text-primary); }
+.hi-style { padding: 0 6px; border-radius: 3px; background: var(--bg-card); font-size: 10px; }
+.hi-style.formal { color: #60a5fa; }
+.hi-style.casual { color: #34d399; }
+.hi-style.tech { color: #f0b90b; }
+.hi-del { margin-left: auto; cursor: pointer; font-size: 16px; line-height: 1; color: var(--text-muted); padding: 0 4px; }
+.hi-del:hover { color: var(--color-danger); }
+.hi-title { font-size: 13px; font-weight: 500; color: var(--text-primary); margin: 4px 0 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hi-meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); }
+.hi-preview { font-size: 12px; color: var(--text-secondary); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 768px) { .tone-cards { grid-template-columns: 1fr; } }
 </style>

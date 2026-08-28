@@ -12,7 +12,9 @@ const api = axios.create({
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    console.error('API Error:', error)
+    const url = error?.config?.url || ''
+    const status = error?.response?.status || 'unknown'
+    console.error(`[API ${status}] ${error?.config?.method?.toUpperCase()} ${url}: ${error?.message}`)
     return Promise.reject(error)
   }
 )
@@ -111,8 +113,24 @@ export function generateCoverLetter(data: {
   candidate_name: string
   style: string
   recipient: string
+  user_id?: string
+  company_name?: string
+  position_title?: string
 }) {
   return api.post('/cover-letter/generate', data)
+}
+
+// 求职信历史
+export function getCoverLetterHistory(userId?: string) {
+  return api.get('/cover-letter/history', { params: userId ? { user_id: userId } : {} })
+}
+
+export function getCoverLetterDetail(id: number) {
+  return api.get(`/cover-letter/history/${id}`)
+}
+
+export function deleteCoverLetter(id: number) {
+  return api.delete(`/cover-letter/history/${id}`)
 }
 
 // 投递管理

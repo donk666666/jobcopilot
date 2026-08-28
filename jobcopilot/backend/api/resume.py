@@ -97,8 +97,13 @@ async def tailor_resume(request: ResumeTailorRequest, db: Session = Depends(get_
             "并在每处修改之后用【改动说明：xxx】标注", "。不要添加任何改动说明或注释"
         )
 
+    # 简历过长截断（避免 LLM 输出耗时）—— 一般简历 2500 字足够保留所有关键信息
+    resume_text = request.resume_text
+    if len(resume_text) > 2500:
+        resume_text = resume_text[:2500] + "\n...(简历后段省略)"
+
     # 查缓存
-    cached = get_cached_llm(request.jd_analysis, request.resume_text, f"tailor_ann{1 if annotations_on else 0}")
+    cached = get_cached_llm(request.jd_analysis, resume_text, f"tailor_ann{1 if annotations_on else 0}")
     if cached is not None:
         # 存入库
         if request.opt_id:
@@ -112,7 +117,7 @@ async def tailor_resume(request: ResumeTailorRequest, db: Session = Depends(get_
         # 无 opt_id，新建
         record = ResumeOptimization(
             jd_analysis_json=request.jd_analysis,
-            resume_text=request.resume_text,
+            resume_text=resume_text,
             tailored_resume=cached,
             annotations_enabled=1 if annotations_on else 0,
         )
@@ -126,6 +131,7 @@ async def tailor_resume(request: ResumeTailorRequest, db: Session = Depends(get_
         base_url=DEEPSEEK_BASE_URL,
         model=DEEPSEEK_MODEL,
         temperature=0.6,
+        max_tokens=2500,  # 限制输出长度，避免 LLM 啰嗦
     )
 
     messages = [
@@ -133,14 +139,14 @@ async def tailor_resume(request: ResumeTailorRequest, db: Session = Depends(get_
         HumanMessage(content=RESUME_TAILOR_USER_TEMPLATE.format(
             jd_analysis=request.jd_analysis,
             match_result=request.match_result,
-            resume_text=request.resume_text
+            resume_text=resume_text
         ))
     ]
 
     response = await llm.ainvoke(messages)
     tailored = response.content
 
-    cache_llm_result(request.jd_analysis, request.resume_text, f"tailor_ann{1 if annotations_on else 0}", tailored)
+    cache_llm_result(request.jd_analysis, resume_text, f"tailor_ann{1 if annotations_on else 0}", tailored)
 
     # 存入库
     if request.opt_id:
@@ -154,7 +160,7 @@ async def tailor_resume(request: ResumeTailorRequest, db: Session = Depends(get_
     # 无 opt_id，新建
     record = ResumeOptimization(
         jd_analysis_json=request.jd_analysis,
-        resume_text=request.resume_text,
+        resume_text=resume_text,
         tailored_resume=tailored,
         annotations_enabled=1 if annotations_on else 0,
     )

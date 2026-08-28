@@ -307,13 +307,22 @@ function getScoreColor(score: number) {
   return 'var(--color-danger)'
 }
 
-// 各维度满分权重（与后端 prompt 定义一致，用于归一化雷达图）
+// 各维度满分权重（与后端 prompts/parallel_agents.py 的 AGENT_PROMPTS key 一致）
+// 后端实际维度：tech_stack / project_exp / soft_skills / growth
+// 每维度满分100，归一化到 0-100 百分比
 const DIMENSION_WEIGHTS: Record<string, number> = {
-  '技能匹配': 40,
-  '经验匹配': 25,
-  '学历匹配': 10,
-  '综合素质': 15,
-  '加分项': 10,
+  'tech_stack': 100,
+  'project_exp': 100,
+  'soft_skills': 100,
+  'growth': 100,
+}
+
+// 维度 key → 中文显示名（前端 UI 用）
+const DIMENSION_LABELS: Record<string, string> = {
+  'tech_stack': '技术栈',
+  'project_exp': '项目经验',
+  'soft_skills': '软实力',
+  'growth': '成长潜力',
 }
 
 const radarData = computed(() => {
@@ -324,7 +333,8 @@ const radarData = computed(() => {
       const num = Number(v)
       const weight = DIMENSION_WEIGHTS[k] || 100
       // 归一化为 0-100 百分比，让各维度按各自满分计算实际占比
-      return [k, Math.min(100, Math.round((num / weight) * 100))]
+      const label = DIMENSION_LABELS[k] || k
+      return [label, Math.min(100, Math.round((num / weight) * 100))]
     })
   )
 })
@@ -337,7 +347,8 @@ const breakdownData = computed(() => {
   return Object.entries(matchResult.value.score_breakdown).map(([k, v]) => {
     const num = Number(v)
     const weight = DIMENSION_WEIGHTS[k] || 100
-    return { label: k, percent: Math.min(100, Math.round((num / weight) * 100)), raw: num, weight }
+    const label = DIMENSION_LABELS[k] || k
+    return { label, percent: Math.min(100, Math.round((num / weight) * 100)), raw: num, weight }
   })
 })
 </script>

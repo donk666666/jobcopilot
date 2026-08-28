@@ -107,7 +107,7 @@ async def analyze_jd(request: JDAnalyzeRequest, db: Session = Depends(get_db)):
         base_url=DEEPSEEK_BASE_URL,
         model=DEEPSEEK_MODEL,
         temperature=0.1,
-        max_tokens=2000,
+        max_tokens=4000,
     )
 
     nonce = uuid.uuid4().hex[:8]
