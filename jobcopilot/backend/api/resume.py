@@ -12,11 +12,12 @@ from agent.core import match_resume_direct, tailor_resume_direct
 import config
 from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
 from rag.vector_store import get_vector_store
-from database import get_db, ResumeOptimization, Resume
+from database import get_db, ResumeOptimization, Resume, User
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from prompts.resume_tailor import RESUME_MATCH_SYSTEM, RESUME_MATCH_USER_TEMPLATE, RESUME_TAILOR_SYSTEM, RESUME_TAILOR_USER_TEMPLATE
 from cache import cache_llm_result, get_cached_llm, get_redis_status
+from api.auth import get_current_user
 
 router = APIRouter(prefix="/api/resume", tags=["简历优化"])
 
@@ -191,10 +192,12 @@ async def start_full_pipeline(request: FullPipelineRequest):
 
     try:
         import redis as redis_lib
+        # 用 RESP2 协议（Redis 5.x 不支持 HELLO 3）
         r = redis_lib.Redis.from_url(
             config.REDIS_URL + "/1" if not config.REDIS_URL.endswith("/1") else config.REDIS_URL,
-            socket_connect_timeout=1,
-            socket_timeout=1,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+            protocol=2,
         )
         r.ping()
     except Exception:
@@ -276,12 +279,31 @@ class ResumeSaveRequest(BaseModel):
 
 
 @router.get("/active")
-def get_active_resume(db: Session = Depends(get_db)):
-    """获取当前激活的简历"""
-    r = db.query(Resume).filter(Resume.is_active == 1).order_by(Resume.updated_at.desc()).first()
+def get_active_resume(db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+    """获取当前用户的激活简历"""
+    r = db.query(Resume).filter(
+        Resume.user_id == current.id,
+        Resume.is_active == 1,
+    ).order_by(Resume.updated_at.desc()).first()
     if not r:
         return {"content": "", "name": ""}
     return {"id": r.id, "content": r.content, "name": r.name}
+
+
+@router.post("/active")
+def save_active_resume(req: ResumeSaveRequest, db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+    """保存当前用户的激活简历（同时取消该用户其他简历的激活）"""
+    # 先取消该用户所有激活
+    db.query(Resume).filter(
+        Resume.user_id == current.id,
+        Resume.is_active == 1,
+    ).update({"is_active": 0})
+    # 写入新的激活简历
+    new_r = Resume(user_id=current.id, name=req.name, content=req.resume_text, is_active=1)
+    db.add(new_r)
+    db.commit()
+    db.refresh(new_r)
+    return {"id": new_r.id, "name": new_r.name, "message": "已保存为激活简历"}
 
 
 @router.get("/versions")
@@ -343,3 +365,114 @@ async def get_rag_stats():
     """获取RAG向量库状态"""
     store = get_vector_store()
     return store.get_store_stats()
+
+
+# ===== 简历导出 Word =====
+
+class ExportDocxRequest(BaseModel):
+    title: str = "简历"
+    content: str
+    candidate_name: str | None = None
+
+
+@router.post("/export-docx")
+async def export_resume_docx(req: ExportDocxRequest):
+    """把改写后的简历文本导出为 Word .docx 文件"""
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    doc = Document()
+
+    # 设置默认字体（中文兼容：同时设置 ASCII + 东亚字体回退）
+    from docx.oxml.ns import qn
+    style = doc.styles['Normal']
+    style.font.name = 'Calibri'  # ASCII 默认
+    style.font.size = Pt(11)
+    # 东亚字体回退（中文）
+    rpr = style.element.get_or_add_rPr()
+    rfonts = rpr.find(qn('w:rFonts'))
+    if rfonts is None:
+        from docx.oxml import OxmlElement
+        rfonts = OxmlElement('w:rFonts')
+        rpr.append(rfonts)
+    rfonts.set(qn('w:eastAsia'), '宋体')  # 中文回退字体
+    rfonts.set(qn('w:ascii'), 'Calibri')
+    rfonts.set(qn('w:hAnsi'), 'Calibri')
+
+    content = (req.content or "").strip()
+    if not content:
+        content = "（暂无内容）"
+
+    title = req.title or "个人简历"
+    # 主标题
+    head = doc.add_paragraph()
+    head.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = head.add_run(title)
+    run.bold = True
+    run.font.size = Pt(18)
+
+    # 候选姓名
+    if req.candidate_name:
+        sub = doc.add_paragraph()
+        sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        sub_run = sub.add_run(req.candidate_name)
+        sub_run.font.size = Pt(12)
+        sub_run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+
+    doc.add_paragraph()  # 空行
+
+    # 按行解析内容（Markdown 简易转换）
+    lines = content.split("\n")
+    for line in lines:
+        line = line.rstrip()
+        if not line.strip():
+            doc.add_paragraph()
+            continue
+        # 去除 Markdown 标记
+        text = line.strip()
+        is_heading = False
+        if text.startswith("### "):
+            text = text[4:]; is_heading = True
+        elif text.startswith("## "):
+            text = text[3:]; is_heading = True
+        elif text.startswith("# "):
+            text = text[2:]; is_heading = True
+        # 处理加粗 **xxx**
+        import re
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+        # 列表 - xxx
+        m = re.match(r'^[-*]\s+(.+)$', text)
+        if m:
+            text = "• " + m.group(1)
+
+        p = doc.add_paragraph()
+        if is_heading:
+            run = p.add_run(text)
+            run.bold = True
+            run.font.size = Pt(13)
+            run.font.color.rgb = RGBColor(0x00, 0xb5, 0x74)
+        else:
+            p.add_run(text)
+
+    # 输出
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    base_name = req.candidate_name or "resume"
+    ascii_name = "".join(c if ord(c) < 128 else "_" for c in base_name)
+    utf8_name = f"{base_name}_简历.docx"
+    import urllib.parse
+    encoded_utf8 = urllib.parse.quote(utf8_name)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{ascii_name}_resume.docx"; '
+                f"filename*=UTF-8''{encoded_utf8}"
+            ),
+        },
+    )

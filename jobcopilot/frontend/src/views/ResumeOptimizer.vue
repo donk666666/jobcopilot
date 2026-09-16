@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { matchResume, tailorResume, getJDAnalyses, getResumeOptimizations, getActiveResume, saveActiveResume, uploadResume, submitFullPipeline, getTaskStatus, getResumeHistory, updateResumeHistory, deleteResumeHistory } from '@/api'
+import { ElMessage } from 'element-plus'
+import { matchResume, tailorResume, getJDAnalyses, getResumeOptimizations, getActiveResume, saveActiveResume, uploadResume, getResumeHistory, updateResumeHistory, deleteResumeHistory, exportResumeDocx } from '@/api'
 import RadarChart from '@/components/RadarChart.vue'
 import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 
 const resumeText = ref('')
 const jdAnalysisText = ref('')
 const loading = ref(false)
+const tailorLoading = ref(false)
+const downloadingDocx = ref(false)
 const matchResult = ref<any>(null)
 const tailoredResult = ref('')
 const error = ref('')
@@ -32,27 +35,6 @@ const editingName = ref('')
 const uploadLoading = ref(false)
 const uploadedFile = ref<{ name: string; char_count: number } | null>(null)
 const uploadRef = ref<any>(null)
-
-// 一键全流程
-const pipelineRunning = ref(false)
-const pipelineTaskId = ref('')
-const pipelineStatus = ref('')
-const pipelineProgress = ref(0)
-const pipelineStep = ref('')
-const pipelineError = ref('')
-let pollTimer: ReturnType<typeof setInterval> | null = null
-let pollFailCount = 0
-let pollTimeoutTimer: ReturnType<typeof setTimeout> | null = null
-const PIPELINE_STEPS = [
-  { key: 'ANALYZING_JD', label: '分析JD' },
-  { key: 'MATCHING', label: '匹配简历' },
-  { key: 'TAILORING', label: '定制简历' },
-  { key: 'WRITING_LETTER', label: '生成求职信' },
-]
-const currentStepIndex = computed(() => {
-  const idx = PIPELINE_STEPS.findIndex(s => s.key === pipelineStatus.value)
-  return idx >= 0 ? idx : (pipelineStatus.value === 'SUCCESS' ? 4 : 0)
-})
 
 // ---- 文件上传处理 ----
 async function handleFileChange(file: any) {
@@ -86,88 +68,7 @@ function beforeUpload(file: any) {
   return true
 }
 
-// ---- 一键全流程 ----
-async function handleFullPipeline() {
-  if (!resumeText.value.trim() || !jdAnalysisText.value.trim()) {
-    error.value = '请先上传简历并选择JD分析结果'
-    return
-  }
-  pipelineRunning.value = true
-  pipelineError.value = ''
-  pipelineProgress.value = 0
-  pipelineStep.value = ''
-  pipelineStatus.value = ''
-  pollFailCount = 0
-  try {
-    const res: any = await submitFullPipeline({
-      resume_text: resumeText.value,
-      jd_text: jdAnalysisText.value,
-      jd_analysis_id: selectedJdId.value || undefined,
-      style: 'professional',
-    })
-    pipelineTaskId.value = res.task_id
-    pipelineStatus.value = 'PENDING'
-    startPolling()
-  } catch (e: any) {
-    pipelineError.value = e?.response?.data?.detail || e.message || '提交失败'
-    pipelineRunning.value = false
-  }
-}
-
-function startPolling() {
-  stopPolling()
-  // 5 分钟超时保护
-  pollTimeoutTimer = setTimeout(() => {
-    stopPolling()
-    pipelineRunning.value = false
-    pipelineError.value = '全流程超时（5分钟），请检查后端服务'
-  }, 5 * 60 * 1000)
-  pollTimer = setInterval(async () => {
-    try {
-      const res: any = await getTaskStatus(pipelineTaskId.value)
-      pipelineStatus.value = res.status
-      pipelineProgress.value = res.progress || pipelineProgress.value
-      pipelineStep.value = res.step || pipelineStep.value
-      pollFailCount = 0
-      if (res.status === 'SUCCESS') {
-        stopPolling()
-        pipelineRunning.value = false
-        if (res.result) {
-          if (res.result.dimension_scores) {
-            matchResult.value = {
-              overall_score: res.result.output,
-              match_score: Object.values(res.result.dimension_scores as Record<string, number>).reduce((a: number, b: number) => a + b, 0) / 4,
-              dimension_scores: res.result.dimension_scores,
-              contradictions: res.result.contradictions,
-            }
-          }
-          if (res.result.output) {
-            tailoredResult.value = typeof res.result.output === 'string' ? res.result.output : JSON.stringify(res.result.output, null, 2)
-          }
-        }
-        loadHistory()
-      } else if (res.status === 'FAILURE') {
-        stopPolling()
-        pipelineRunning.value = false
-        pipelineError.value = res.error || '全流程执行失败'
-      }
-    } catch {
-      pollFailCount++
-      if (pollFailCount >= 3) {
-        stopPolling()
-        pipelineRunning.value = false
-        pipelineError.value = '轮询任务状态失败，请检查服务状态'
-      }
-    }
-  }, 2000)
-}
-
-function stopPolling() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
-  if (pollTimeoutTimer) { clearTimeout(pollTimeoutTimer); pollTimeoutTimer = null }
-}
-
-onUnmounted(() => stopPolling())
+// 文件上传 / 匹配 / 改写 之间的轮询清理代码已删除
 
 async function loadHistory() {
   historyLoading.value = true
@@ -209,6 +110,8 @@ watch(showAnnotations, async (val) => {
       JSON.stringify(matchResult.value), currentOptId.value || undefined, val,
     )
     tailoredResult.value = res.result
+    // 跨页面共享给求职信页
+    try { localStorage.setItem('last_tailored_resume', res.result) } catch {}
     if (res.opt_id) currentOptId.value = res.opt_id
     loadHistory()
   } catch (e: any) { error.value = e.message || '重新生成失败' }
@@ -278,6 +181,8 @@ async function handleMatch() {
     const res: any = await matchResume(resumeText.value, jdAnalysisText.value, selectedJdId.value || undefined)
     matchResult.value = res.result
     lastMatchedForTailor.value = JSON.stringify(res.result)
+    // 跨页面共享给求职信页（last_match_result / last_tailored_resume）
+    try { localStorage.setItem('last_match_result', JSON.stringify(res.result)) } catch {}
     if (res.opt_id) currentOptId.value = res.opt_id
     try { await saveActiveResume(resumeText.value) } catch { /* ignore */ }
     loadHistory()
@@ -287,18 +192,54 @@ async function handleMatch() {
 
 async function handleTailor() {
   if (!matchResult.value) { error.value = '请先完成匹配度分析'; return }
-  loading.value = true; error.value = ''; tailoredResult.value = ''
+  tailorLoading.value = true; error.value = ''; tailoredResult.value = ''
   try {
     const res: any = await tailorResume(
       resumeText.value, jdAnalysisText.value,
       JSON.stringify(matchResult.value), currentOptId.value || undefined, showAnnotations.value,
     )
     tailoredResult.value = res.result
+    // 跨页面共享给求职信页
+    try { localStorage.setItem('last_tailored_resume', res.result) } catch {}
     if (res.opt_id) currentOptId.value = res.opt_id
     activeTab.value = 'tailored'
     loadHistory()
   } catch (e: any) { error.value = e.message || '简历优化失败' }
-  finally { loading.value = false }
+  finally { tailorLoading.value = false }
+}
+
+// 下载改写后简历为 Word
+async function downloadTailoredAsDocx() {
+  if (!tailoredResult.value) return
+  downloadingDocx.value = true
+  try {
+    const blob = (await exportResumeDocx({
+      title: '改写后简历',
+      content: tailoredResult.value,
+    })) as unknown as Blob
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `改写简历_${new Date().toISOString().slice(0, 10)}.docx`
+    a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('已下载 Word')
+  } catch (e: any) {
+    ElMessage.error('下载失败：' + (e?.message || ''))
+  } finally {
+    downloadingDocx.value = false
+  }
+}
+
+// 复制到剪贴板
+async function copyTailored() {
+  if (!tailoredResult.value) return
+  try {
+    await navigator.clipboard.writeText(tailoredResult.value)
+    ElMessage.success('已复制到剪贴板')
+  } catch {
+    ElMessage.error('复制失败，请手动选择文本')
+  }
 }
 
 function getScoreColor(score: number) {
@@ -308,21 +249,23 @@ function getScoreColor(score: number) {
 }
 
 // 各维度满分权重（与后端 prompts/parallel_agents.py 的 AGENT_PROMPTS key 一致）
-// 后端实际维度：tech_stack / project_exp / soft_skills / growth
-// 每维度满分100，归一化到 0-100 百分比
+// 后端分项权重（与 backend/prompts/resume_tailor.py 一致）
+// 每维度满分不同，分项分数加和应等于 match_score
 const DIMENSION_WEIGHTS: Record<string, number> = {
-  'tech_stack': 100,
-  'project_exp': 100,
-  'soft_skills': 100,
-  'growth': 100,
+  '技能匹配': 40,
+  '经验匹配': 25,
+  '学历匹配': 10,
+  '综合素质': 15,
+  '加分项': 10,
 }
 
 // 维度 key → 中文显示名（前端 UI 用）
 const DIMENSION_LABELS: Record<string, string> = {
-  'tech_stack': '技术栈',
-  'project_exp': '项目经验',
-  'soft_skills': '软实力',
-  'growth': '成长潜力',
+  '技能匹配': '技能匹配',
+  '经验匹配': '经验匹配',
+  '学历匹配': '学历匹配',
+  '综合素质': '综合素质',
+  '加分项': '加分项',
 }
 
 const radarData = computed(() => {
@@ -351,12 +294,58 @@ const breakdownData = computed(() => {
     return { label, percent: Math.min(100, Math.round((num / weight) * 100)), raw: num, weight }
   })
 })
+
+// ===== A-H 8 段式评估 =====
+const hasAhEval = computed(() => {
+  const m = matchResult.value
+  if (!m) return false
+  return !!(m.block_a_role_summary || m.block_b_requirements || m.block_c_level_strategy
+    || m.block_d_compensation || m.block_e_personalization?.length || m.block_f_interview_prep?.length
+    || m.block_g_legitimacy)
+})
+
+function importanceIcon(imp: string): string {
+  return { high: '🔴', medium: '🟡', low: '⚪' }[imp] || '·'
+}
+function matchIcon(m: string): string {
+  return { matched: '✅', partial: '🟡', missing: '❌' }[m] || '·'
+}
+function weightSourceShort(ws: string): string {
+  return { jd_explicit: 'JD原文', jd_structure: 'JD结构', estimated: 'AI估算' }[ws] || ws
+}
+function weightSourceLabel(ws: string): string {
+  return {
+    jd_explicit: 'JD 自己明确写出的要求',
+    jd_structure: '从 JD 结构推断',
+    estimated: 'AI 基于岗位通用要求估算（不可信）',
+  }[ws] || ws
+}
+function levelGapLabel(g: string): string {
+  return { 'under-qualified': '⚠️ 偏低', 'match': '✅ 匹配', 'over-qualified': '💪 偏高' }[g] || g
+}
+function compFitLabel(f: string): string {
+  return {
+    'below_market': '🟢 低于市场（好）',
+    'market': '🟡 正常',
+    'above_market': '🔴 高于市场（警惕）',
+    'unknown': '⚪ 不确定',
+  }[f] || f
+}
+function interviewTypeIcon(t: string): string {
+  return { behavioral: '🗣️', technical: '💻', company: '🏢' }[t] || '·'
+}
+function interviewTypeLabel(t: string): string {
+  return { behavioral: '行为', technical: '技术', company: '公司' }[t] || t
+}
+function trustLabel(t: string): string {
+  return { high: '🟢 高', medium: '🟡 中', low: '🔴 低' }[t] || t
+}
 </script>
 
 <template>
   <div class="resume-page">
-    <h2 class="page-title">简历智能优化</h2>
-    <p class="page-sub">上传简历 + 选择历史JD分析，AI 评估匹配度并定向优化（RAG 检索增强）</p>
+    <h2 class="page-title">岗位匹配 & 简历优化</h2>
+    <p class="page-sub">两阶段流程：① 选历史 JD 分析 → AI 按 A-H 8 段框架评估匹配度（Block A-H，含 weight_source 重要性、weight 来源、资历策略、薪资评估、防骗红旗）→ ② 根据匹配诊断定向改写简历</p>
 
     <el-row :gutter="20" style="margin-top: 20px">
       <el-col :span="7">
@@ -443,24 +432,18 @@ const breakdownData = computed(() => {
             </div>
           </div>
           <div class="action-row">
+            <el-tag :type="matchResult ? 'success' : 'warning'" size="default" effect="dark" round style="margin-right: 8px">
+              Step 1
+            </el-tag>
             <el-button type="primary" :loading="loading" @click="handleMatch" :disabled="!selectedJdId" class="action-btn">
-              {{ loading && !matchResult ? '分析中...' : '开始匹配分析' }}
+              {{ loading && !matchResult ? '分析中...' : (matchResult ? '重新匹配分析' : '① 开始匹配分析') }}
             </el-button>
-            <el-button type="success" :loading="pipelineRunning" @click="handleFullPipeline" :disabled="!selectedJdId || !resumeText.trim()" class="action-btn">
-              一键全流程
+            <el-tag v-if="matchResult" :type="tailoredResult ? 'success' : 'warning'" size="default" effect="dark" round style="margin: 0 8px 0 16px">
+              Step 2
+            </el-tag>
+            <el-button v-if="matchResult" type="success" :loading="tailorLoading" @click="handleTailor" :disabled="!matchResult" class="action-btn">
+              {{ tailorLoading ? '改写中...' : (tailoredResult ? '② 重新改写简历' : '② 根据匹配结果改写简历') }}
             </el-button>
-          </div>
-
-          <!-- Pipeline 进度 -->
-          <div v-if="pipelineRunning || pipelineError" class="pipeline-progress-card">
-            <div v-if="pipelineRunning" class="pipeline-status">
-              <el-steps :active="currentStepIndex" align-center finish-status="success" process-status="process">
-                <el-step v-for="s in PIPELINE_STEPS" :key="s.key" :title="s.label" />
-              </el-steps>
-              <el-progress :percentage="pipelineProgress" :stroke-width="6" style="margin-top: 12px" />
-              <p v-if="pipelineStep" class="pipeline-step-text">{{ pipelineStep }}</p>
-            </div>
-            <el-alert v-if="pipelineError" :title="pipelineError" type="error" show-icon closable @close="pipelineError = ''" style="margin-top: 8px" />
           </div>
         </div>
 
@@ -517,6 +500,126 @@ const breakdownData = computed(() => {
             </div>
           </div>
 
+          <!-- A-H 8 段式评估（A 角色摘要 / B 要求匹配 / C 资历策略 / D 薪资 / E 个性化 / F 面试准备 / G 防骗 / H 表单答案）-->
+          <div v-if="hasAhEval" class="ah-eval-section">
+            <!-- A. 角色摘要 -->
+            <div v-if="matchResult.block_a_role_summary" class="ah-block ah-block-a">
+              <h4 class="section-label">📌 A. 角色摘要</h4>
+              <p class="ah-quote">{{ matchResult.block_a_role_summary }}</p>
+            </div>
+
+            <!-- B. 要求匹配 -->
+            <div v-if="matchResult.block_b_requirements?.length" class="ah-block ah-block-b">
+              <div class="ah-block-header">
+                <h4 class="section-label">📋 B. 要求匹配</h4>
+                <span v-if="matchResult.block_b_score !== undefined" class="ah-block-score">
+                  Block B 得分：<b>{{ matchResult.block_b_score }}</b> / 40
+                </span>
+              </div>
+              <div v-for="(r, idx) in matchResult.block_b_requirements" :key="idx" class="ah-req-item">
+                <div class="ah-req-top">
+                  <span class="ah-req-imp" :class="`imp-${r.importance}`">
+                    {{ importanceIcon(r.importance) }}
+                  </span>
+                  <span class="ah-req-match" :class="`match-${r.resume_match}`">
+                    {{ matchIcon(r.resume_match) }}
+                  </span>
+                  <span class="ah-req-text">{{ r.requirement }}</span>
+                  <span v-if="r.weight_source" class="ah-req-src" :title="weightSourceLabel(r.weight_source)">
+                    {{ weightSourceShort(r.weight_source) }}
+                  </span>
+                </div>
+                <div v-if="r.evidence && r.evidence !== '无'" class="ah-req-evidence">
+                  → 简历证据：{{ r.evidence }}
+                </div>
+              </div>
+            </div>
+
+            <!-- C. 资历策略 -->
+            <div v-if="matchResult.block_c_level_strategy" class="ah-block ah-block-c">
+              <h4 class="section-label">🎯 C. 资历策略</h4>
+              <div class="ah-level-row">
+                <span class="ah-level-item">
+                  <span class="ah-level-label">JD 要求</span>
+                  <span class="ah-level-val">{{ matchResult.block_c_level_strategy.jd_required_level || '?' }}</span>
+                </span>
+                <span class="ah-level-arrow">→</span>
+                <span class="ah-level-item">
+                  <span class="ah-level-label">你的实际</span>
+                  <span class="ah-level-val">{{ matchResult.block_c_level_strategy.resume_actual_level || '?' }}</span>
+                </span>
+                <span class="ah-level-gap" :class="`gap-${matchResult.block_c_level_strategy.gap}`">
+                  {{ levelGapLabel(matchResult.block_c_level_strategy.gap) }}
+                </span>
+              </div>
+              <p v-if="matchResult.block_c_level_strategy.suggestion" class="ah-suggestion">
+                💡 {{ matchResult.block_c_level_strategy.suggestion }}
+              </p>
+            </div>
+
+            <!-- D. 薪资 -->
+            <div v-if="matchResult.block_d_compensation" class="ah-block ah-block-d">
+              <h4 class="section-label">💰 D. 薪资评估</h4>
+              <div class="ah-comp-row">
+                <div class="ah-comp-item">
+                  <span class="ah-comp-label">JD 范围</span>
+                  <span class="ah-comp-val">{{ matchResult.block_d_compensation.jd_salary_range || '未明确' }}</span>
+                </div>
+                <div class="ah-comp-item">
+                  <span class="ah-comp-label">市场参考</span>
+                  <span class="ah-comp-val">{{ matchResult.block_d_compensation.market_range || '?' }}</span>
+                </div>
+                <div class="ah-comp-fit" :class="`fit-${matchResult.block_d_compensation.fit}`">
+                  {{ compFitLabel(matchResult.block_d_compensation.fit) }}
+                </div>
+              </div>
+              <p v-if="matchResult.block_d_compensation.note" class="ah-comp-note">
+                {{ matchResult.block_d_compensation.note }}
+              </p>
+            </div>
+
+            <!-- E. 个性化切入点 -->
+            <div v-if="matchResult.block_e_personalization?.length" class="ah-block ah-block-e">
+              <h4 class="section-label">✨ E. 个性化切入点</h4>
+              <ul class="ah-list">
+                <li v-for="(p, i) in matchResult.block_e_personalization" :key="i">{{ p }}</li>
+              </ul>
+            </div>
+
+            <!-- F. 面试准备 -->
+            <div v-if="matchResult.block_f_interview_prep?.length" class="ah-block ah-block-f">
+              <h4 class="section-label">🎤 F. 面试准备</h4>
+              <div v-for="(q, idx) in matchResult.block_f_interview_prep" :key="idx" class="ah-interview-item">
+                <div class="ah-interview-q">
+                  <span class="ah-interview-type" :class="`type-${q.question_type}`">
+                    {{ interviewTypeIcon(q.question_type) }} {{ interviewTypeLabel(q.question_type) }}
+                  </span>
+                  <span class="ah-interview-text">{{ q.question }}</span>
+                </div>
+                <div v-if="q.answer_direction" class="ah-interview-direction">
+                  → 回答方向：{{ q.answer_direction }}
+                </div>
+              </div>
+            </div>
+
+            <!-- G. 防骗 / 防僵尸 JD -->
+            <div v-if="matchResult.block_g_legitimacy" class="ah-block ah-block-g">
+              <h4 class="section-label">🛡️ G. 防骗检测</h4>
+              <div class="ah-trust-row">
+                <span class="ah-trust-label">可信度</span>
+                <span class="ah-trust-val" :class="`trust-${matchResult.block_g_legitimacy.overall_trust}`">
+                  {{ trustLabel(matchResult.block_g_legitimacy.overall_trust) }}
+                </span>
+              </div>
+              <div v-if="matchResult.block_g_legitimacy.red_flags?.length" class="ah-flags">
+                <div v-for="(f, i) in matchResult.block_g_legitimacy.red_flags" :key="i" class="ah-flag-item">
+                  ⚠️ {{ f }}
+                </div>
+              </div>
+              <div v-else class="ah-no-flags">✅ 无明显红旗</div>
+            </div>
+          </div>
+
           <!-- Matched points -->
           <div v-if="matchResult?.matched_points?.length" class="tag-section">
             <h4 class="section-label">匹配点</h4>
@@ -538,10 +641,24 @@ const breakdownData = computed(() => {
             <h4 class="section-label">整体评价</h4>
             <p class="assessment-text">{{ matchResult.overall_assessment }}</p>
           </div>
+        </div>
 
-          <el-button type="primary" :loading="loading" @click="handleTailor" style="width: 100%; margin-top: 20px">
-            {{ loading && tailoredResult ? '正在生成优化简历（约20秒）...' : (tailoredResult ? '重新生成优化简历' : '根据匹配结果优化简历') }}
-          </el-button>
+        <!-- 改写后简历展示区 -->
+        <div v-if="tailoredResult" class="result-card" style="margin-top: 16px">
+          <div class="tailor-header">
+            <h3 class="section-label">📝 改写后简历</h3>
+            <div class="tailor-actions">
+              <el-button size="small" plain @click="downloadTailoredAsDocx" :disabled="downloadingDocx">
+                <el-icon><Download /></el-icon>
+                下载 Word
+              </el-button>
+              <el-button size="small" plain @click="copyTailored">
+                <el-icon><DocumentCopy /></el-icon>
+                复制
+              </el-button>
+            </div>
+          </div>
+          <pre class="tailor-content">{{ tailoredResult }}</pre>
         </div>
 
         <div v-else class="empty-result">
@@ -670,12 +787,299 @@ const breakdownData = computed(() => {
 .upload-area.uploading { opacity: 0.7; }
 .upload-success { font-size: 13px; padding: 6px 0; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
 
-/* Pipeline */
-.pipeline-progress-card {
-  margin-top: 12px; padding: 16px;
-  background: var(--bg-deepest); border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-card);
+.tailor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
 }
-.pipeline-status { text-align: center; }
-.pipeline-step-text { margin: 8px 0 0; font-size: 13px; color: var(--text-muted); }
+.tailor-actions { display: flex; gap: 8px; }
+.tailor-content {
+  background: var(--bg-deepest, #f5f6f7);
+  border: 1px solid var(--border-subtle, #e5e7eb);
+  border-radius: 6px;
+  padding: 16px;
+  max-height: 600px;
+  overflow-y: auto;
+  font-family: var(--font-mono, Consolas, monospace);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+/* ===== A-H 8 段式评估 ===== */
+.ah-eval-section {
+  margin-top: 16px;
+  border-top: 1px dashed var(--border-subtle, #e5e7eb);
+  padding-top: 16px;
+}
+.ah-block {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  background: var(--bg-deepest, #f8f9fa);
+  border-radius: var(--radius-card, 8px);
+  border-left: 3px solid var(--accent, #00b574);
+}
+.ah-block .section-label {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent, #00b574);
+}
+.ah-quote {
+  margin: 0;
+  padding: 8px 12px;
+  background: rgba(0, 181, 116, 0.08);
+  border-left: 2px solid var(--accent, #00b574);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+.ah-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+.ah-block-score {
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+}
+.ah-block-score b {
+  color: var(--accent, #00b574);
+  font-size: 14px;
+}
+
+/* Block B 要求列表 */
+.ah-req-item {
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: #fff;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle, #e5e7eb);
+}
+.ah-req-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.ah-req-imp, .ah-req-match {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.ah-req-text {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary, #1f2937);
+  min-width: 0;
+}
+.ah-req-src {
+  font-size: 10px;
+  padding: 1px 6px;
+  background: rgba(99, 102, 241, 0.1);
+  color: #6366f1;
+  border-radius: 3px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.ah-req-evidence {
+  margin-top: 4px;
+  margin-left: 24px;
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+  line-height: 1.5;
+}
+
+/* Block C 资历策略 */
+.ah-level-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.ah-level-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ah-level-label {
+  font-size: 11px;
+  color: var(--text-muted, #6b7280);
+}
+.ah-level-val {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #1f2937);
+}
+.ah-level-arrow {
+  color: var(--text-muted, #9ca3af);
+  font-size: 18px;
+}
+.ah-level-gap {
+  margin-left: auto;
+  padding: 4px 10px;
+  background: #fff;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.ah-level-gap.gap-match { color: var(--color-success, #16a34a); }
+.ah-level-gap.gap-under-qualified { color: var(--color-warning, #f59e0b); }
+.ah-level-gap.gap-over-qualified { color: var(--accent, #00b574); }
+.ah-suggestion {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: rgba(245, 158, 11, 0.08);
+  border-left: 2px solid #f59e0b;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-primary, #1f2937);
+  line-height: 1.5;
+}
+
+/* Block D 薪资 */
+.ah-comp-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.ah-comp-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ah-comp-label {
+  font-size: 11px;
+  color: var(--text-muted, #6b7280);
+}
+.ah-comp-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #1f2937);
+}
+.ah-comp-fit {
+  margin-left: auto;
+  padding: 4px 10px;
+  background: #fff;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.ah-comp-fit.fit-below_market { color: var(--color-success, #16a34a); }
+.ah-comp-fit.fit-market { color: var(--color-warning, #f59e0b); }
+.ah-comp-fit.fit-above_market { color: var(--color-danger, #dc2626); }
+.ah-comp-fit.fit-unknown { color: var(--text-muted, #9ca3af); }
+.ah-comp-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+  line-height: 1.5;
+}
+
+/* Block E 列表 */
+.ah-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--text-primary, #1f2937);
+  line-height: 1.7;
+}
+.ah-list li { margin-bottom: 4px; }
+
+/* Block F 面试准备 */
+.ah-interview-item {
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: #fff;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle, #e5e7eb);
+}
+.ah-interview-q {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.ah-interview-type {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 3px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.ah-interview-type.type-technical {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+}
+.ah-interview-type.type-behavioral {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+}
+.ah-interview-type.type-company {
+  background: rgba(139, 92, 246, 0.1);
+  color: #8b5cf6;
+}
+.ah-interview-text {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary, #1f2937);
+  min-width: 0;
+}
+.ah-interview-direction {
+  margin-top: 4px;
+  margin-left: 4px;
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+  line-height: 1.5;
+}
+
+/* Block G 防骗 */
+.ah-trust-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ah-trust-label {
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+}
+.ah-trust-val {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 4px;
+  background: #fff;
+}
+.ah-trust-val.trust-high { color: var(--color-success, #16a34a); }
+.ah-trust-val.trust-medium { color: var(--color-warning, #f59e0b); }
+.ah-trust-val.trust-low { color: var(--color-danger, #dc2626); }
+.ah-flag-item {
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  background: rgba(220, 38, 38, 0.08);
+  border-left: 2px solid var(--color-danger, #dc2626);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-primary, #1f2937);
+  line-height: 1.5;
+}
+.ah-no-flags {
+  padding: 6px 10px;
+  background: rgba(16, 185, 129, 0.08);
+  border-left: 2px solid var(--color-success, #16a34a);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--color-success, #16a34a);
+}
 </style>

@@ -360,15 +360,15 @@ onMounted(loadHistory)
       </el-col>
     </el-row>
 
-    <!-- 历史记录侧栏 -->
-    <div class="history-sidebar" v-if="history.length > 0 || historyLoading">
-      <div class="history-header">
-        <h4>分析历史 <el-tag size="small" type="info">{{ history.length }}</el-tag></h4>
+    <!-- 历史记录（页面下方，与主结果并排两栏） -->
+    <div v-if="history.length > 0 || historyLoading" class="history-section">
+      <div class="section-head">
+        <h3>分析历史 <el-tag size="small" type="info">{{ history.length }}</el-tag></h3>
         <el-button size="small" text @click="loadHistory" :loading="historyLoading">刷新</el-button>
       </div>
       <div v-if="historyLoading && history.length === 0" class="history-empty">加载中...</div>
-      <div v-else-if="history.length === 0" class="history-empty">暂无历史，每次分析的 JD都会自动保存到这里</div>
-      <div v-else class="history-list">
+      <div v-else-if="history.length === 0" class="history-empty">暂无历史，每次分析的 JD 都会自动保存到这里</div>
+      <div v-else class="history-grid">
         <div
           v-for="item in history"
           :key="item.id"
@@ -598,20 +598,34 @@ onMounted(loadHistory)
 }
 
 /* 历史侧栏 */
-.history-sidebar {
-  margin-top: 20px;
+.history-section {
+  margin-top: 24px;
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-card);
-  padding: 16px;
+  padding: 20px;
 }
-.history-header {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 12px;
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
 }
-.history-header h4 {
-  margin: 0; font-size: 14px; font-weight: 600;
-  display: flex; align-items: center; gap: 8px;
+.section-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.history-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 10px;
 }
 .history-empty {
   text-align: center; color: var(--text-muted);

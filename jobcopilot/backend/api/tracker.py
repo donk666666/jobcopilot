@@ -8,7 +8,8 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
 
-from database import get_db, Application
+from database import get_db, Application, User
+from api.auth import get_current_user
 
 router = APIRouter(prefix="/api/tracker", tags=["投递管理"])
 
@@ -56,10 +57,11 @@ class ApplicationResponse(BaseModel):
 @router.get("/", response_model=list[ApplicationResponse])
 def list_applications(
     status: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
 ):
-    """获取所有投递记录，可按状态筛选"""
-    query = db.query(Application)
+    """获取当前用户的投递记录，可按状态筛选"""
+    query = db.query(Application).filter(Application.user_id == current.id)
     if status:
         query = query.filter(Application.status == status)
     records = query.order_by(Application.updated_at.desc()).all()
@@ -79,19 +81,18 @@ def list_applications(
 
 
 @router.get("/stats")
-def get_stats(db: Session = Depends(get_db)):
-    """获取投递统计"""
-    total = db.query(Application).count()
+def get_stats(db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+    """获取当前用户的投递统计"""
+    q = db.query(Application).filter(Application.user_id == current.id)
+    total = q.count()
     statuses = [
         "待投递", "已投递", "初筛中", "面试中", "已发Offer", "已拒绝"
     ]
     breakdown = {}
     for s in statuses:
-        breakdown[s] = db.query(Application).filter(Application.status == s).count()
+        breakdown[s] = q.filter(Application.status == s).count()
 
-    avg_score = db.query(Application).filter(
-        Application.match_score.isnot(None)
-    ).all()
+    avg_score = q.filter(Application.match_score.isnot(None)).all()
     avg = sum(a.match_score for a in avg_score) / len(avg_score) if avg_score else 0
 
     return {
@@ -102,9 +103,16 @@ def get_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/{application_id}")
-def get_application(application_id: int, db: Session = Depends(get_db)):
-    """获取单条投递记录详情"""
-    app = db.query(Application).filter(Application.id == application_id).first()
+def get_application(
+    application_id: int,
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """获取单条投递记录详情（限本人）"""
+    app = db.query(Application).filter(
+        Application.id == application_id,
+        Application.user_id == current.id,
+    ).first()
     if not app:
         raise HTTPException(status_code=404, detail="记录不存在")
     return {
@@ -125,9 +133,14 @@ def get_application(application_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/")
-def create_application(data: ApplicationCreate, db: Session = Depends(get_db)):
-    """创建投递记录"""
+def create_application(
+    data: ApplicationCreate,
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """创建投递记录（当前用户）"""
     app = Application(
+        user_id=current.id,
         company_name=data.company_name,
         position_title=data.position_title,
         jd_text=data.jd_text,
@@ -149,10 +162,14 @@ def create_application(data: ApplicationCreate, db: Session = Depends(get_db)):
 def update_application(
     application_id: int,
     data: ApplicationUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
 ):
-    """更新投递记录"""
-    app = db.query(Application).filter(Application.id == application_id).first()
+    """更新投递记录（限本人）"""
+    app = db.query(Application).filter(
+        Application.id == application_id,
+        Application.user_id == current.id,
+    ).first()
     if not app:
         raise HTTPException(status_code=404, detail="记录不存在")
 
@@ -166,9 +183,16 @@ def update_application(
 
 
 @router.delete("/{application_id}")
-def delete_application(application_id: int, db: Session = Depends(get_db)):
-    """删除投递记录"""
-    app = db.query(Application).filter(Application.id == application_id).first()
+def delete_application(
+    application_id: int,
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """删除投递记录（限本人）"""
+    app = db.query(Application).filter(
+        Application.id == application_id,
+        Application.user_id == current.id,
+    ).first()
     if not app:
         raise HTTPException(status_code=404, detail="记录不存在")
     db.delete(app)

@@ -33,12 +33,25 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+# ----- 用户 -----
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    username = Column(String(50), unique=True, nullable=False, index=True)
+    password_hash = Column(String(200), nullable=False)
+    nickname = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 # ----- JD分析记录 -----
 
 class JDAnalysis(Base):
     __tablename__ = "jd_analyses"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, nullable=True, index=True, comment="所属用户ID")
     position_title = Column(String(200), nullable=True, comment="职位名称")
     company_name = Column(String(200), nullable=True, comment="公司名称")
     jd_raw = Column(Text, nullable=False, comment="原始JD文本")
@@ -53,6 +66,7 @@ class Application(Base):
     __tablename__ = "applications"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, nullable=True, index=True, comment="所属用户ID")
     company_name = Column(String(200), nullable=False, comment="公司名称")
     position_title = Column(String(200), nullable=False, comment="职位名称")
     jd_text = Column(Text, nullable=True, comment="原始JD文本")
@@ -76,6 +90,7 @@ class Resume(Base):
     __tablename__ = "resumes"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, nullable=True, index=True, comment="所属用户ID")
     name = Column(String(100), nullable=False, comment="简历名称/版本")
     content = Column(Text, nullable=False, comment="简历内容")
     is_active = Column(Integer, default=0, comment="是否当前激活版本")
@@ -89,6 +104,7 @@ class ResumeOptimization(Base):
     __tablename__ = "resume_optimizations"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, nullable=True, index=True, comment="所属用户ID")
     jd_analysis_id = Column(Integer, nullable=True, comment="关联的JD分析ID")
     resume_text = Column(Text, nullable=False, comment="原始简历")
     jd_analysis_json = Column(Text, nullable=True, comment="JD分析结果JSON")
@@ -106,7 +122,7 @@ class CoverLetterHistory(Base):
     __tablename__ = "cover_letter_history"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    user_id = Column(String(100), nullable=False, default="anonymous", comment="用户ID（前端 localStorage UUID）")
+    user_id = Column(Integer, nullable=True, index=True, comment="所属用户ID")
     candidate_name = Column(String(100), nullable=True, comment="候选人姓名")
     recipient = Column(String(100), nullable=True, comment="收信人")
     style = Column(String(50), nullable=True, comment="风格: formal/casual/tech")
@@ -116,6 +132,34 @@ class CoverLetterHistory(Base):
     resume_text = Column(Text, nullable=True, comment="原始简历")
     content = Column(Text, nullable=False, comment="求职信内容")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+# ----- 简历素材库（多份简历） -----
+
+class ResumeLibrary(Base):
+    __tablename__ = "resume_library"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, index=True, comment="所属用户ID")
+    title = Column(String(100), nullable=False, comment="简历标题/版本名")
+    content = Column(Text, nullable=False, comment="简历内容")
+    is_active = Column(Integer, default=0, comment="是否当前激活")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+# ----- JD 素材库（多份 JD） -----
+
+class JDLibrary(Base):
+    __tablename__ = "jd_library"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, index=True, comment="所属用户ID")
+    title = Column(String(100), nullable=False, comment="JD 标题/岗位名")
+    company_name = Column(String(200), nullable=True, comment="公司名")
+    content = Column(Text, nullable=False, comment="JD 内容")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 def init_db():

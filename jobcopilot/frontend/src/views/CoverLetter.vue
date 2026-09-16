@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { generateCoverLetter, getCoverLetterHistory, deleteCoverLetter } from '@/api'
+import { ref, onMounted, watch } from 'vue'
+import { generateCoverLetter, getCoverLetterHistory, deleteCoverLetter, listResumeMaterials, listJDMaterials, getActiveResume } from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 // 从 localStorage 取用户ID（与简历优化页一致）
@@ -8,22 +8,85 @@ function getUserId() {
   try { return localStorage.getItem('userId') || 'anonymous' } catch { return 'anonymous' }
 }
 
-const jdText = ref('')
-const resumeText = ref('')
-const candidateName = ref('')
-const companyName = ref('')
-const positionTitle = ref('')
-const style = ref('formal')
-const recipient = ref('招聘负责人')
+// ===== 持久化（与 ChatView 一致：切页面不丢） =====
+const COVER_KEYS = {
+  jd: 'coverJd',
+  resume: 'coverResume',
+  candidateName: 'coverCandidateName',
+  companyName: 'coverCompanyName',
+  positionTitle: 'coverPositionTitle',
+  style: 'coverStyle',
+  recipient: 'coverRecipient',
+}
+function loadFromStorage(key: string): string {
+  try { return localStorage.getItem(key) || '' } catch { return '' }
+}
+function saveToStorage(key: string, val: string) {
+  try { localStorage.setItem(key, val) } catch {}
+}
+
+const jdText = ref(loadFromStorage(COVER_KEYS.jd))
+const resumeText = ref(loadFromStorage(COVER_KEYS.resume))
+const candidateName = ref(loadFromStorage(COVER_KEYS.candidateName))
+const companyName = ref(loadFromStorage(COVER_KEYS.companyName))
+const positionTitle = ref(loadFromStorage(COVER_KEYS.positionTitle))
+const style = ref(loadFromStorage(COVER_KEYS.style) || 'formal')
+const recipient = ref(loadFromStorage(COVER_KEYS.recipient) || '招聘负责人')
 const loading = ref(false)
 const result = ref('')
 const error = ref('')
 const step = ref(1)
 
+// 简历优化页面 → 求职信页 跨页面共享 last_result
+const lastMatchResult = ref<any>(null)
+const lastTailored = ref('')
+
+// 自动持久化（用户每改一次就保存）
+watch(jdText, v => saveToStorage(COVER_KEYS.jd, v))
+watch(resumeText, v => saveToStorage(COVER_KEYS.resume, v))
+watch(candidateName, v => saveToStorage(COVER_KEYS.candidateName, v))
+watch(companyName, v => saveToStorage(COVER_KEYS.companyName, v))
+watch(positionTitle, v => saveToStorage(COVER_KEYS.positionTitle, v))
+watch(style, v => saveToStorage(COVER_KEYS.style, v))
+watch(recipient, v => saveToStorage(COVER_KEYS.recipient, v))
+
 // 求职信历史
 const history = ref<any[]>([])
 const historyLoading = ref(false)
 const userId = getUserId()
+
+// ===== 素材库弹窗 =====
+const materialPicker = ref(false)
+const materialType = ref<'resume' | 'jd'>('resume')
+const materialList = ref<any[]>([])
+const materialLoading = ref(false)
+
+async function openMaterialPicker(type: 'resume' | 'jd') {
+  materialType.value = type
+  materialPicker.value = true
+  materialLoading.value = true
+  try {
+    if (type === 'resume') {
+      materialList.value = ((await listResumeMaterials()) as unknown as any[]) || []
+    } else {
+      materialList.value = ((await listJDMaterials()) as unknown as any[]) || []
+    }
+  } catch {
+    ElMessage.error('加载素材失败')
+  } finally {
+    materialLoading.value = false
+  }
+}
+
+function pickMaterial(m: any) {
+  if (materialType.value === 'resume') {
+    resumeText.value = m.content
+  } else {
+    jdText.value = m.content
+  }
+  materialPicker.value = false
+  ElMessage.success(`已填入：${m.title}`)
+}
 
 const styleOptions = [
   {
@@ -113,7 +176,53 @@ async function removeHistory(item: any, e?: Event) {
   } catch {}
 }
 
-onMounted(() => { loadHistory() })
+onMounted(() => {
+  loadHistory()
+  // 读取简历优化页的 A-H 评估结果（如果用户刚跑过）
+  try {
+    const raw = localStorage.getItem('last_match_result')
+    if (raw) lastMatchResult.value = JSON.parse(raw)
+    const tailored = localStorage.getItem('last_tailored_resume')
+    if (tailored) lastTailored.value = tailored
+  } catch {}
+  // 如果有上次的简历优化结果，提示用户导入
+  if (lastMatchResult.value || lastTailored.value) {
+    ElMessage.info('检测到刚才简历优化页的结果，可点"导入上次评估"快速填入')
+  }
+})
+
+function importLastEval() {
+  if (lastMatchResult.value) {
+    // block_a_role_summary 是 JD 摘要，可以填到 jdText（如果还没填）
+    if (!jdText.value.trim() && lastMatchResult.value.block_a_role_summary) {
+      jdText.value = `【岗位摘要】${lastMatchResult.value.block_a_role_summary}\n\n【JD 关键要求】\n` +
+        (lastMatchResult.value.block_b_requirements || [])
+          .map((r: any) => `- ${r.requirement}（重要性: ${r.importance}）`).join('\n')
+      ElMessage.success('已导入 JD 摘要 + Block B 要求列表')
+    }
+  }
+  if (lastTailored.value && !resumeText.value.trim()) {
+    resumeText.value = lastTailored.value
+    ElMessage.success('已导入上次改写的简历')
+  }
+  if (!lastMatchResult.value && !lastTailored.value) {
+    ElMessage.warning('没有找到上次的评估结果，请先去"简历优化"页跑一次')
+  }
+}
+
+async function loadFromActiveResume() {
+  try {
+    const r: any = await getActiveResume()
+    if (r?.content) {
+      resumeText.value = r.content
+      ElMessage.success(`已加载激活简历：${r.name || '默认'}`)
+    } else {
+      ElMessage.warning('暂未设置激活简历，请先去"简历优化"页保存一份')
+    }
+  } catch (e: any) {
+    ElMessage.error('加载失败：' + (e?.message || ''))
+  }
+}
 
 function copyResult() {
   navigator.clipboard.writeText(result.value)
@@ -151,18 +260,50 @@ function reset() { step.value = 1; result.value = ''; error.value = ''; }
 
     <!-- Step 1: Input -->
     <div v-if="step === 1" class="step-content">
+      <!-- 跨页面导入 -->
+      <div class="import-bar">
+        <el-alert
+          v-if="lastMatchResult || lastTailored"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 12px"
+        >
+          <template #title>
+            检测到简历优化页的 A-H 评估结果，可一键导入 JD 摘要 + 改写后的简历
+            <el-button type="primary" size="small" link @click="importLastEval" style="margin-left: 12px">
+              <el-icon><Download /></el-icon> 导入上次评估
+            </el-button>
+          </template>
+        </el-alert>
+
+        <div class="quick-actions">
+          <el-button size="small" plain @click="openMaterialPicker('jd')">
+            <el-icon><Files /></el-icon> 从素材库选 JD
+          </el-button>
+          <el-button size="small" plain @click="openMaterialPicker('resume')">
+            <el-icon><Files /></el-icon> 从素材库选简历
+          </el-button>
+          <el-button size="small" plain @click="loadFromActiveResume">
+            <el-icon><Document /></el-icon> 加载当前激活简历
+          </el-button>
+        </div>
+      </div>
+
       <div class="input-cards">
         <div class="cv-input-card">
-          <h4>职位描述</h4>
-          <el-input v-model="jdText" type="textarea" :rows="6" placeholder="粘贴目标职位JD..." />
+          <h4>职位描述 <span class="field-hint">（必填）</span></h4>
+          <el-input v-model="jdText" type="textarea" :rows="6" placeholder="粘贴目标职位 JD 文本…" />
         </div>
         <div class="cv-input-card">
-          <h4>你的简历</h4>
-          <el-input v-model="resumeText" type="textarea" :rows="8" placeholder="粘贴你的简历..." />
+          <h4>你的简历 <span class="field-hint">（必填）</span></h4>
+          <el-input v-model="resumeText" type="textarea" :rows="8" placeholder="粘贴你的简历文本…" />
         </div>
         <div class="cv-input-card">
           <h4>补充信息（可选）</h4>
           <el-input v-model="candidateName" placeholder="你的姓名" style="margin-bottom: 12px" />
+          <el-input v-model="companyName" placeholder="公司名称（让求职信更针对）" style="margin-bottom: 12px" />
+          <el-input v-model="positionTitle" placeholder="岗位名称（JD 里的职位名）" style="margin-bottom: 12px" />
           <el-input v-model="recipient" placeholder="收信人称呼" />
         </div>
       </div>
@@ -264,6 +405,28 @@ function reset() { step.value = 1; result.value = ''; error.value = ''; }
           </div>
         </el-col>
       </el-row>
+
+    <!-- 素材库选择弹窗 -->
+    <el-dialog v-model="materialPicker" :title="materialType === 'resume' ? '选择简历素材' : '选择 JD 素材'" width="640px">
+      <div v-if="materialLoading" class="picker-loading">加载中…</div>
+      <div v-else-if="!materialList.length" class="picker-empty">素材库是空的，先去素材库添加吧</div>
+      <div v-else class="picker-list">
+        <div v-for="m in materialList" :key="m.id" class="picker-item" @click="pickMaterial(m)">
+          <el-icon :size="20" style="color: var(--accent)">
+            <component :is="materialType === 'resume' ? 'Document' : 'Files'" />
+          </el-icon>
+          <div class="picker-body">
+            <div class="picker-title">
+              {{ m.title }}
+              <span v-if="materialType === 'resume' && m.is_active" class="picker-tag">激活</span>
+              <span v-if="materialType === 'jd' && m.company_name" class="picker-tag">{{ m.company_name }}</span>
+            </div>
+            <div class="picker-preview">{{ m.content.slice(0, 80) }}{{ m.content.length > 80 ? '…' : '' }}</div>
+          </div>
+          <el-icon class="picker-arrow"><Right /></el-icon>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -365,6 +528,32 @@ function reset() { step.value = 1; result.value = ''; error.value = ''; }
 .hi-title { font-size: 13px; font-weight: 500; color: var(--text-primary); margin: 4px 0 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hi-meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); }
 .hi-preview { font-size: 12px; color: var(--text-secondary); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 跨页面导入栏 */
+.import-bar { margin-bottom: 16px; }
+.quick-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.field-hint { font-size: 12px; font-weight: normal; color: var(--text-muted); margin-left: 6px; }
+
+/* 素材库弹窗（与 ChatView 共享样式） */
+.picker-loading, .picker-empty { padding: 40px 20px; text-align: center; color: var(--text-muted); font-size: 13px; }
+.picker-list { display: flex; flex-direction: column; gap: 8px; max-height: 480px; overflow-y: auto; }
+.picker-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-input, 4px);
+  cursor: pointer;
+  transition: all var(--t-fast, 0.15s);
+}
+.picker-item:hover { border-color: var(--accent, #00b574); background: rgba(0, 181, 116, 0.04); }
+.picker-body { flex: 1; min-width: 0; }
+.picker-title {
+  font-size: 14px; font-weight: 700; color: var(--text-primary, #1f2937);
+  display: flex; align-items: center; gap: 6px;
+}
+.picker-tag { font-size: 10px; padding: 1px 6px; background: var(--accent, #00b574); color: #fff; border-radius: 2px; }
+.picker-preview { font-size: 12px; color: var(--text-secondary, #6b7280); margin-top: 2px; line-height: 1.4; }
+.picker-arrow { color: var(--text-muted, #9ca3af); }
 
 @media (max-width: 768px) { .tone-cards { grid-template-columns: 1fr; } }
 </style>

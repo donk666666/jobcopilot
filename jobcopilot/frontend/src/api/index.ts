@@ -2,10 +2,24 @@ import axios from 'axios'
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 120000,  // 2分钟超时（LLM调用可能较慢）
+  timeout: 180000,  // 3分钟超时（LLM 全流程 60-90 秒，网络慢时 180 秒更稳）
   headers: {
-    'Content-Type': 'application/json',
+    'Content-Type': 'application/json; charset=utf-8',
   },
+  // 关键：让 axios 不要转换请求体编码（vite 代理 + 后端都按 UTF-8 处理）
+  transformRequest: [(data) => {
+    if (typeof data === 'string') return data
+    return JSON.stringify(data)
+  }],
+})
+
+// 请求拦截器：自动加 Authorization 头
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
 })
 
 // 响应拦截器
@@ -15,15 +29,47 @@ api.interceptors.response.use(
     const url = error?.config?.url || ''
     const status = error?.response?.status || 'unknown'
     console.error(`[API ${status}] ${error?.config?.method?.toUpperCase()} ${url}: ${error?.message}`)
+    // 401：token 失效或没登录，跳登录页（但不要在登录页本身触发跳转）
+    if (status === 401 && !url.includes('/auth/')) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('user')
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
     return Promise.reject(error)
   }
 )
 
 export default api
 
-// ---- API 函数 ----
+// ---- 认证 API ----
 
-// JD分析
+export interface UserInfo {
+  id: number
+  username: string
+  nickname: string | null
+  created_at: string
+}
+
+export interface AuthResponse {
+  token: string
+  user: UserInfo
+}
+
+export function login(username: string, password: string) {
+  return api.post<AuthResponse>('/auth/login', { username, password })
+}
+
+export function register(username: string, password: string, nickname?: string) {
+  return api.post<AuthResponse>('/auth/register', { username, password, nickname })
+}
+
+export function fetchMe() {
+  return api.get<UserInfo>('/auth/me')
+}
+
+// ---- JD分析 ----
 export function analyzeJD(jdText: string) {
   return api.post('/jd/analyze', { jd_text: jdText })
 }
@@ -190,6 +236,60 @@ export function healthCheck() {
   return api.get('/health')
 }
 
+// ===== 素材库（多份简历 + 多份 JD）=====
+
+export interface ResumeMaterial {
+  id: number
+  title: string
+  content: string
+  is_active: number
+  created_at: string
+  updated_at: string
+}
+
+export interface JDMaterial {
+  id: number
+  title: string
+  company_name: string | null
+  content: string
+  created_at: string
+  updated_at: string
+}
+
+export function listResumeMaterials() {
+  return api.get<ResumeMaterial[]>('/materials/resumes')
+}
+export function createResumeMaterial(data: { title: string; content: string; is_active?: boolean }) {
+  return api.post<ResumeMaterial>('/materials/resumes', data)
+}
+export function updateResumeMaterial(id: number, data: { title?: string; content?: string; is_active?: boolean }) {
+  return api.put<ResumeMaterial>(`/materials/resumes/${id}`, data)
+}
+export function deleteResumeMaterial(id: number) {
+  return api.delete(`/materials/resumes/${id}`)
+}
+
+// 简历导出 Word
+export function exportResumeDocx(data: { title?: string; content: string; candidate_name?: string }) {
+  return api.post('/resume/export-docx', data, {
+    responseType: 'blob',
+    timeout: 30000,
+  })
+}
+
+export function listJDMaterials() {
+  return api.get<JDMaterial[]>('/materials/jds')
+}
+export function createJDMaterial(data: { title: string; company_name?: string; content: string }) {
+  return api.post<JDMaterial>('/materials/jds', data)
+}
+export function updateJDMaterial(id: number, data: { title?: string; company_name?: string; content?: string }) {
+  return api.put<JDMaterial>(`/materials/jds/${id}`, data)
+}
+export function deleteJDMaterial(id: number) {
+  return api.delete(`/materials/jds/${id}`)
+}
+
 // 简历文件上传
 export function uploadResume(file: File) {
   const formData = new FormData()
@@ -232,4 +332,22 @@ export function generateGreeting(data: {
   variant_count?: number
 }) {
   return api.post('/greet/generate', data)
+}
+
+// Chat 对话
+export function chatSend(data: {
+  question: string
+  session_id?: string
+  resume_text?: string
+  jd_text?: string
+}) {
+  return api.post('/chat/send', data)
+}
+
+export function chatHistory(sessionId: string) {
+  return api.get(`/chat/history/${sessionId}`)
+}
+
+export function chatClear(sessionId: string) {
+  return api.delete(`/chat/history/${sessionId}`)
 }
