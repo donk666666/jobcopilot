@@ -17,29 +17,39 @@ _redis = None
 _redis_available: Optional[bool] = None
 
 
-def _get_redis():
-    """延迟初始化 Redis 连接，失败则标记不可用"""
-    global _redis, _redis_available
-    if _redis_available is not None:
-        return _redis if _redis_available else None
-
+def _probe_redis():
+    """每次都新建一个短连接探测 Redis（避免模块全局缓存导致永久卡死）"""
+    import redis as redis_lib
     try:
-        import redis as redis_lib
-
-        _redis = redis_lib.Redis.from_url(
+        client = redis_lib.Redis.from_url(
             REDIS_URL,
             socket_connect_timeout=2,
             socket_timeout=2,
             decode_responses=True,
         )
-        _redis.ping()
-        _redis_available = True
-        logger.info("Redis 连接成功")
-        return _redis
-    except Exception as e:
-        _redis_available = False
-        logger.warning(f"Redis 不可用，缓存功能降级: {e}")
+        client.ping()
+        return client
+    except Exception:
         return None
+
+
+def _get_redis():
+    """获取可用的 Redis 客户端：可用则复用缓存，不可用则重新探测"""
+    global _redis, _redis_available
+    if _redis_available is True and _redis is not None:
+        try:
+            _redis.ping()
+            return _redis
+        except Exception:
+            _redis = None
+            _redis_available = False
+    new_client = _probe_redis()
+    if new_client is not None:
+        _redis = new_client
+        _redis_available = True
+        return _redis
+    _redis_available = False
+    return None
 
 
 def _make_key(prefix: str, *args: str) -> str:
@@ -49,8 +59,9 @@ def _make_key(prefix: str, *args: str) -> str:
 
 
 def get_redis_status() -> dict:
-    r = _get_redis()
-    if r is not None:
+    """每次都实时探测 Redis 状态（解决进程启动时检测失败永久不可用问题）"""
+    client = _probe_redis()
+    if client is not None:
         return {"available": True}
     return {"available": False, "error": "Redis 连接不可用"}
 

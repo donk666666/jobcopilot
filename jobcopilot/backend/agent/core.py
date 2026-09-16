@@ -232,18 +232,22 @@ async def match_resume_direct(
     vector_store.add_resume(resume_text)
     rag_context = vector_store.search_all(resume_text, top_k=5)
 
+    # 简历过长截断（避免 prompt 过长拖慢 LLM）
+    resume_for_llm = resume_text[:2500] if len(resume_text) > 2500 else resume_text
+
     llm = ChatOpenAI(
         api_key=api_key,
         base_url=base_url,
         model=DEEPSEEK_MODEL,
         temperature=0.5,
+        max_tokens=2000,
     )
 
     messages = [
         SystemMessage(content=RESUME_MATCH_SYSTEM),
         HumanMessage(content=RESUME_MATCH_USER_TEMPLATE.format(
             jd_analysis=jd_analysis,
-            resume_text=resume_text,
+            resume_text=resume_for_llm,
             rag_context=rag_context
         ))
     ]
@@ -273,11 +277,17 @@ async def tailor_resume_direct(
     from langchain_core.messages import HumanMessage, SystemMessage
     from prompts.resume_tailor import RESUME_TAILOR_SYSTEM, RESUME_TAILOR_USER_TEMPLATE
 
+    # 简历超长时截断，避免 LLM 输入 token 爆掉
+    max_resume_chars = 2500
+    if len(resume_text) > max_resume_chars:
+        resume_text = resume_text[:max_resume_chars] + "\n...(简历过长已截断)"
+
     llm = ChatOpenAI(
         api_key=api_key,
         base_url=base_url,
         model=DEEPSEEK_MODEL,
         temperature=0.6,
+        max_tokens=1500,  # 限制输出长度，避免生成过久
     )
 
     messages = [

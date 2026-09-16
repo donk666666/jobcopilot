@@ -31,7 +31,8 @@ DATABASE_URL = os.getenv(
 CHROMA_DIR = os.getenv("CHROMA_DIR", os.path.join(BASE_DIR, "data", "chroma_db"))
 
 # Redis 配置（缓存 + Celery 消息队列）
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+# 默认走 WSL Redis 6380（6379 被 Windows 系统进程占）
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6380")
 
 # CORS配置
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")

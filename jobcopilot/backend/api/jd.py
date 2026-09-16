@@ -16,6 +16,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
 from prompts.jd_analyzer import JD_ANALYZER_SYSTEM, JD_ANALYZER_USER_TEMPLATE
 from database import get_db, JDAnalysis
+from api.auth import get_current_user
+from database import User
 
 router = APIRouter(prefix="/api/jd", tags=["JD分析"])
 
@@ -97,7 +99,7 @@ def _extract_json(text: str):
 
 
 @router.post("/analyze")
-async def analyze_jd(request: JDAnalyzeRequest, db: Session = Depends(get_db)):
+async def analyze_jd(request: JDAnalyzeRequest, db: Session = Depends(get_db), current: User = Depends(get_current_user)):
     """分析职位描述JD，返回结构化信息，并存入历史记录"""
     if not request.jd_text.strip():
         raise HTTPException(status_code=400, detail="JD文本不能为空")
@@ -107,7 +109,7 @@ async def analyze_jd(request: JDAnalyzeRequest, db: Session = Depends(get_db)):
         base_url=DEEPSEEK_BASE_URL,
         model=DEEPSEEK_MODEL,
         temperature=0.1,
-        max_tokens=2000,
+        max_tokens=4000,
     )
 
     nonce = uuid.uuid4().hex[:8]
@@ -140,6 +142,7 @@ async def analyze_jd(request: JDAnalyzeRequest, db: Session = Depends(get_db)):
         # 存入历史
         if request.save:
             record = JDAnalysis(
+                user_id=current.id,
                 position_title=parsed.get("position_title", "未知职位"),
                 company_name=parsed.get("company_name") or "",
                 jd_raw=request.jd_text,
@@ -164,9 +167,9 @@ async def analyze_jd(request: JDAnalyzeRequest, db: Session = Depends(get_db)):
 # ---- 历史记录 ----
 
 @router.get("/history")
-def list_analyses(db: Session = Depends(get_db)):
-    """获取所有JD分析历史，按时间倒序"""
-    records = db.query(JDAnalysis).order_by(JDAnalysis.created_at.desc()).limit(30).all()
+def list_analyses(db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+    """获取当前用户的JD分析历史，按时间倒序"""
+    records = db.query(JDAnalysis).filter(JDAnalysis.user_id == current.id).order_by(JDAnalysis.created_at.desc()).limit(30).all()
     return [
         {
             "id": r.id,
@@ -181,9 +184,9 @@ def list_analyses(db: Session = Depends(get_db)):
 
 
 @router.delete("/history/{analysis_id}")
-def delete_analysis(analysis_id: int, db: Session = Depends(get_db)):
-    """删除一条JD分析记录"""
-    record = db.query(JDAnalysis).filter(JDAnalysis.id == analysis_id).first()
+def delete_analysis(analysis_id: int, db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+    """删除一条JD分析记录（限本人）"""
+    record = db.query(JDAnalysis).filter(JDAnalysis.id == analysis_id, JDAnalysis.user_id == current.id).first()
     if not record:
         raise HTTPException(status_code=404, detail="记录不存在")
     db.delete(record)

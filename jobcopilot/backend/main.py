@@ -3,12 +3,17 @@ JobCopilot FastAPI 入口文件
 """
 
 import os
+# 注意：必须在 import langchain_openai 之前打补丁
+from patch_chatopenai import apply_patch
+apply_patch()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import CORS_ORIGINS
 from database import init_db
-from api import jd, resume, cover_letter, tracker, upload, tasks as task_api, greet
+from api import jd, resume, cover_letter, tracker, upload, tasks as task_api, greet, auth, materials
+import api.chat as chat_module
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -34,6 +39,9 @@ app.include_router(tracker.router)
 app.include_router(upload.router)
 app.include_router(task_api.router)
 app.include_router(greet.router)
+app.include_router(auth.auth_router)
+app.include_router(materials.router)
+app.include_router(chat_module.chat_router)
 
 
 @app.on_event("startup")
